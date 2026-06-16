@@ -53,16 +53,16 @@ import { SignalReport } from '../../models/signal-report.model';
                      placeholder="e.g., 599" required>
             </mat-form-field>
 
-            <mat-form-field appearance="outline">
-              <mat-label>Time (UTC)</mat-label>
-              <input matInput type="datetime-local" [(ngModel)]="time" name="time" required>
-            </mat-form-field>
-
             <button mat-raised-button color="primary" type="submit"
                     [disabled]="!canSubmit() || isSubmitting()">
               <mat-icon>send</mat-icon>
               Submit Report
             </button>
+
+            <mat-form-field appearance="outline">
+              <mat-label>Time (UTC)</mat-label>
+              <input matInput type="datetime-local" [(ngModel)]="time" name="time" required>
+            </mat-form-field>
           </form>
         </mat-card-content>
       </mat-card>
