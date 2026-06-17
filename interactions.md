@@ -108,3 +108,18 @@
     - Loading indicator while looking up callsigns
     - Updated legend to show both marker types
   - Deployed to Firebase
+
+### Feature: Expandable Table Rows
+- **Request**: Add expandable rows to signal reports table; show basic info collapsed, details on expand
+- **Actions Taken**:
+  - Updated Home component AG Grid with expandable rows:
+    - Rows start collapsed showing: Transmitter's Call, Signal Heard, Time, Receiver's Call, Distance
+    - Expand/collapse button in first column (click to toggle)
+    - Expanded rows show: Frequency (repeater or simplex), Radio (make/model), Antenna, Location
+    - Multiple rows can be expanded simultaneously
+    - Expand All / Collapse All buttons in table header
+  - Added distance calculation using Haversine formula:
+    - Calculates distance in miles between transmitter (via HamDB lookup) and receiver locations
+    - Displays "—" when location data unavailable
+  - Styled expanded content with visual distinction (blue left border, light background)
+  - Deployed to Firebase

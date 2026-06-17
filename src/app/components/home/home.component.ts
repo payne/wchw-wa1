@@ -7,8 +7,9 @@ import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { AgGridAngular } from 'ag-grid-angular';
-import { ColDef, GridReadyEvent, GridApi, ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import { ColDef, GridReadyEvent, GridApi, ModuleRegistry, AllCommunityModule, ICellRendererParams } from 'ag-grid-community';
 import { Subscription } from 'rxjs';
 import { Timestamp } from '@angular/fire/firestore';
 
@@ -17,7 +18,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 import { AuthService } from '../../services/auth.service';
 import { FirestoreService } from '../../services/firestore.service';
 import { UserProfileService } from '../../services/user-profile.service';
-import { SignalReport } from '../../models/signal-report.model';
+import { CallsignLookupService } from '../../services/callsign-lookup.service';
+import { SignalReport, Location } from '../../models/signal-report.model';
 import { SignalMapComponent } from '../signal-map/signal-map.component';
 
 @Component({
@@ -32,6 +34,7 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
     MatButtonModule,
     MatIconModule,
     MatSnackBarModule,
+    MatTooltipModule,
     AgGridAngular,
     SignalMapComponent
   ],
@@ -99,6 +102,14 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
         <mat-card class="grid-card">
           <mat-card-header>
             <mat-card-title>Signal Reports</mat-card-title>
+            <div class="expand-controls">
+              <button mat-icon-button (click)="expandAllRows()" matTooltip="Expand all rows">
+                <mat-icon>unfold_more</mat-icon>
+              </button>
+              <button mat-icon-button (click)="collapseAllRows()" matTooltip="Collapse all rows">
+                <mat-icon>unfold_less</mat-icon>
+              </button>
+            </div>
           </mat-card-header>
           <mat-card-content>
             <ag-grid-angular
@@ -106,6 +117,7 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
               [rowData]="rowData"
               [columnDefs]="columnDefs"
               [defaultColDef]="defaultColDef"
+              [getRowHeight]="getRowHeight"
               [pagination]="true"
               [paginationPageSize]="20"
               (gridReady)="onGridReady($event)">
@@ -151,12 +163,59 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
     .grid-card {
       height: 500px;
     }
+    .grid-card mat-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .expand-controls {
+      display: flex;
+      gap: 4px;
+    }
     .grid-card mat-card-content {
       height: calc(100% - 50px);
     }
     ag-grid-angular {
       width: 100%;
       height: 100%;
+    }
+    :host ::ng-deep .expand-cell {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      cursor: pointer;
+      padding-top: 10px;
+    }
+    :host ::ng-deep .expand-icon {
+      font-size: 18px;
+      color: #666;
+      transition: transform 0.2s;
+    }
+    :host ::ng-deep .expand-icon.expanded {
+      transform: rotate(90deg);
+    }
+    :host ::ng-deep .cell-with-details {
+      display: flex;
+      flex-direction: column;
+      padding: 4px 0;
+    }
+    :host ::ng-deep .cell-with-details .main-value {
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+    :host ::ng-deep .cell-with-details .inline-details {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 11px;
+      color: #555;
+      background: #f8f9fa;
+      padding: 8px;
+      border-radius: 4px;
+      border-left: 3px solid #2196F3;
+    }
+    :host ::ng-deep .cell-with-details .inline-details strong {
+      color: #333;
     }
     @media (max-width: 600px) {
       .report-form {
@@ -172,6 +231,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   private authService = inject(AuthService);
   private firestoreService = inject(FirestoreService);
   private userProfileService = inject(UserProfileService);
+  private callsignLookup = inject(CallsignLookupService);
   private snackBar = inject(MatSnackBar);
   private subscription?: Subscription;
   private gridApi?: GridApi;
@@ -184,9 +244,35 @@ export class HomeComponent implements OnInit, OnDestroy {
   isSubmitting = signal(false);
   mapFirst = signal(true);
 
+  // Track expanded rows and distances
+  private expandedRows = new Set<string>();
+  private distanceCache = new Map<string, number | null>();
+
   columnDefs: ColDef[] = [
-    { field: 'transmitterCall', headerName: "Transmitter's Call", sortable: true, filter: true },
-    { field: 'signalHeard', headerName: 'Signal Heard', sortable: true, filter: true },
+    {
+      headerName: '',
+      field: 'expand',
+      width: 50,
+      minWidth: 50,
+      maxWidth: 50,
+      sortable: false,
+      filter: false,
+      resizable: false,
+      cellRenderer: (params: ICellRendererParams) => this.expandCellRenderer(params)
+    },
+    {
+      field: 'transmitterCall',
+      headerName: "Transmitter's Call",
+      sortable: true,
+      filter: true,
+      cellRenderer: (params: ICellRendererParams) => this.mainCellRenderer(params, 'transmitterCall')
+    },
+    {
+      field: 'signalHeard',
+      headerName: 'Signal Heard',
+      sortable: true,
+      filter: true
+    },
     {
       field: 'time',
       headerName: 'Time (UTC)',
@@ -194,27 +280,24 @@ export class HomeComponent implements OnInit, OnDestroy {
       filter: true,
       valueFormatter: (params) => this.formatTimestamp(params.value)
     },
-    { field: 'receiverCall', headerName: "Receiver's Call", sortable: true, filter: true },
     {
-      headerName: 'Frequency',
+      field: 'receiverCall',
+      headerName: "Receiver's Call",
       sortable: true,
-      filter: true,
-      valueGetter: (params) => {
-        if (params.data?.useRepeater) {
-          return `${params.data.repeaterCallSign || ''} ${params.data.repeaterFrequency || ''}`.trim();
-        }
-        return params.data?.simplexFrequency || '';
-      }
+      filter: true
     },
     {
-      headerName: 'Radio',
+      headerName: 'Distance',
       sortable: true,
       filter: true,
       valueGetter: (params) => {
-        if (params.data?.radioMake || params.data?.radioModel) {
-          return `${params.data.radioMake || ''} ${params.data.radioModel || ''}`.trim();
-        }
-        return '';
+        if (!params.data?.id) return null;
+        const distance = this.distanceCache.get(params.data.id);
+        return distance ?? null;
+      },
+      valueFormatter: (params) => {
+        if (params.value === null || params.value === undefined) return '—';
+        return `${params.value.toFixed(1)} mi`;
       }
     }
   ];
@@ -225,13 +308,27 @@ export class HomeComponent implements OnInit, OnDestroy {
     resizable: true
   };
 
+  getRowHeight = (params: any): number => {
+    if (params.data?.id && this.expandedRows.has(params.data.id)) {
+      return 100;
+    }
+    return 42;
+  };
+
+  private expandListener = (event: Event) => {
+    const customEvent = event as CustomEvent<string>;
+    this.toggleRowExpand(customEvent.detail);
+  };
+
   ngOnInit(): void {
     this.setCurrentTime();
     this.loadSignalReports();
+    window.addEventListener('toggleRowExpand', this.expandListener);
   }
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
+    window.removeEventListener('toggleRowExpand', this.expandListener);
   }
 
   private setCurrentTime(): void {
@@ -243,6 +340,7 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.subscription = this.firestoreService.getSignalReports().subscribe({
       next: (reports) => {
         this.rowData = [...reports];
+        this.calculateDistances();
       },
       error: (error) => {
         console.error('Error loading reports:', error);
@@ -257,6 +355,123 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   toggleMapPosition(): void {
     this.mapFirst.update(v => !v);
+  }
+
+  // Expand/collapse functionality
+  toggleRowExpand(reportId: string): void {
+    if (this.expandedRows.has(reportId)) {
+      this.expandedRows.delete(reportId);
+    } else {
+      this.expandedRows.add(reportId);
+    }
+    this.gridApi?.resetRowHeights();
+    this.gridApi?.refreshCells({ force: true });
+  }
+
+  expandAllRows(): void {
+    this.rowData.forEach(report => {
+      if (report.id) {
+        this.expandedRows.add(report.id);
+      }
+    });
+    this.gridApi?.resetRowHeights();
+    this.gridApi?.refreshCells({ force: true });
+  }
+
+  collapseAllRows(): void {
+    this.expandedRows.clear();
+    this.gridApi?.resetRowHeights();
+    this.gridApi?.refreshCells({ force: true });
+  }
+
+  private expandCellRenderer(params: ICellRendererParams): string {
+    const reportId = params.data?.id;
+    if (!reportId) return '';
+    const isExpanded = this.expandedRows.has(reportId);
+    const icon = isExpanded ? 'expand_more' : 'chevron_right';
+    return `<div class="expand-cell" onclick="window.dispatchEvent(new CustomEvent('toggleRowExpand', {detail: '${reportId}'}))">
+      <span class="material-icons expand-icon ${isExpanded ? 'expanded' : ''}">${icon}</span>
+    </div>`;
+  }
+
+  private mainCellRenderer(params: ICellRendererParams, field: string): string {
+    const reportId = params.data?.id;
+    const value = params.data?.[field] || '';
+    const isExpanded = reportId && this.expandedRows.has(reportId);
+
+    if (!isExpanded) {
+      return `<span>${value}</span>`;
+    }
+
+    const data = params.data;
+    const frequencyInfo = data.useRepeater
+      ? `Repeater: ${data.repeaterCallSign || ''} ${data.repeaterFrequency || ''}`.trim()
+      : `Simplex: ${data.simplexFrequency || 'N/A'}`;
+
+    const radioInfo = (data.radioMake || data.radioModel)
+      ? `${data.radioMake || ''} ${data.radioModel || ''}`.trim()
+      : 'N/A';
+
+    const antennaInfo = data.antenna || 'N/A';
+    const locationInfo = data.location?.address || 'N/A';
+
+    return `
+      <div class="cell-with-details">
+        <span class="main-value">${value}</span>
+        <div class="inline-details">
+          <span><strong>Freq:</strong> ${frequencyInfo}</span>
+          <span><strong>Radio:</strong> ${radioInfo}</span>
+          <span><strong>Antenna:</strong> ${antennaInfo}</span>
+          <span><strong>Location:</strong> ${locationInfo}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // Distance calculation
+  private async calculateDistances(): Promise<void> {
+    for (const report of this.rowData) {
+      if (!report.id) continue;
+
+      const receiverLoc = report.location;
+      if (!receiverLoc?.latitude || !receiverLoc?.longitude) {
+        this.distanceCache.set(report.id, null);
+        continue;
+      }
+
+      // Try to get transmitter location from callsign lookup
+      const transmitterInfo = await this.callsignLookup.lookupCallsign(report.transmitterCall);
+      if (!transmitterInfo?.location?.latitude || !transmitterInfo?.location?.longitude) {
+        this.distanceCache.set(report.id, null);
+        continue;
+      }
+
+      const distance = this.haversineDistance(
+        receiverLoc.latitude,
+        receiverLoc.longitude,
+        transmitterInfo.location.latitude,
+        transmitterInfo.location.longitude
+      );
+      this.distanceCache.set(report.id, distance);
+    }
+
+    this.gridApi?.refreshCells({ columns: ['Distance'], force: true });
+  }
+
+  private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 3958.8; // Earth's radius in miles
+    const dLat = this.toRad(lat2 - lat1);
+    const dLon = this.toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  private toRad(deg: number): number {
+    return deg * (Math.PI / 180);
   }
 
   canSubmit(): boolean {
