@@ -210,3 +210,16 @@
   - Cross-platform compilation targets: Linux, Windows, macOS Intel, macOS ARM
   - Standalone executable (~82MB) requires no runtime dependencies
   - Added compiled binaries to .gitignore
+
+### Security Review
+- **Request**: Check if there are any secrets in the repo that should not be there since it's a public GitHub repository
+- **Findings**:
+  - ✅ No secrets found in repository
+  - Firebase Web API Key in `src/environments/environment.ts` is **safe** - web API keys are public by design, security enforced via Firestore rules
+  - OAuth Client Secrets are NOT committed - CLI prompts users to enter via `lsr setup`, stored locally in `~/.wchw/`
+  - No .env files committed (properly gitignored)
+  - No private keys or hardcoded passwords found
+- **Recommendations** (optional hardening):
+  - Restrict API key to specific domains in Google Cloud Console
+  - Enable Firebase App Check for additional abuse protection
+- Created `security-review-summary.md` for easy reference
