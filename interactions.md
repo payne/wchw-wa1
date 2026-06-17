@@ -123,3 +123,31 @@
     - Displays "—" when location data unavailable
   - Styled expanded content with visual distinction (blue left border, light background)
   - Deployed to Firebase
+
+### Feature: Signal Report Groups
+- **Request**: Add groups for organizing signal reports; groups have system-assigned numbers and user-editable nicknames
+- **Actions Taken**:
+  - Added SignalGroup model with id, groupNumber (system-assigned), nickname, createdAt
+  - Updated UserProfile model to include groups array and currentGroupId
+  - Updated SignalReport model to include groupId and groupNumber
+  - Added group management methods to UserProfileService:
+    - addGroup (auto-assigns next group number)
+    - updateGroupNickname
+    - deleteGroup
+    - setCurrentGroup
+  - Updated Home component to include group info when submitting reports
+  - Updated Configure component with:
+    - Groups section with AG Grid listing all groups
+    - Current group dropdown selector
+    - Create new group form (nickname only, number assigned automatically)
+    - Edit group nickname / delete group
+  - Deployed to Firebase
+
+### Feature: Data Export
+- **Request**: Add ability to download signal report data as CSV or JSON
+- **Actions Taken**:
+  - Added Export Data section to Configure component
+  - Export All Data: Download all signal reports as CSV or JSON
+  - Export Single Group: Select a group and download its reports as CSV or JSON
+  - Export includes: transmitterCall, signalHeard, time, receiverCall, groupNumber, frequency, frequencyType, radioMake, radioModel, antenna, locationAddress, locationLat, locationLong
+  - Deployed to Firebase

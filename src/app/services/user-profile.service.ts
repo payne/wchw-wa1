@@ -3,7 +3,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { AuthService } from './auth.service';
 import { FirestoreService } from './firestore.service';
 import { CallSignDialogComponent } from '../components/call-sign-dialog/call-sign-dialog.component';
-import { UserProfile, RadioSetup, SavedLocation, Location, RepeaterInfo } from '../models/signal-report.model';
+import { UserProfile, RadioSetup, SavedLocation, Location, RepeaterInfo, SignalGroup } from '../models/signal-report.model';
 
 @Injectable({
   providedIn: 'root'
@@ -43,6 +43,15 @@ export class UserProfileService {
       latitude: current.latitude,
       longitude: current.longitude
     };
+  });
+
+  // Groups
+  readonly groups = computed(() => this.profile()?.groups || []);
+  readonly currentGroupId = computed(() => this.profile()?.currentGroupId || null);
+  readonly currentGroup = computed(() => {
+    const groups = this.groups();
+    const currentId = this.currentGroupId();
+    return groups.find(g => g.id === currentId) || null;
   });
 
   readonly useRepeater = computed(() => this.profile()?.useRepeater || false);
@@ -289,6 +298,99 @@ export class UserProfileService {
     } as UserProfile);
   }
 
+  // Groups
+  async addGroup(nickname: string): Promise<SignalGroup> {
+    const user = this.authService.currentUser();
+    if (!user) throw new Error('User not authenticated');
+
+    const currentGroups = this.groups();
+    const nextNumber = currentGroups.length > 0
+      ? Math.max(...currentGroups.map(g => g.groupNumber)) + 1
+      : 1;
+
+    const newGroup: SignalGroup = {
+      id: crypto.randomUUID(),
+      groupNumber: nextNumber,
+      nickname: nickname,
+      createdAt: new Date()
+    };
+
+    const updatedGroups = [...currentGroups, newGroup];
+
+    // If this is the first group, set it as current
+    const updates: Partial<UserProfile> = { groups: updatedGroups };
+    if (currentGroups.length === 0) {
+      updates.currentGroupId = newGroup.id;
+    }
+
+    await this.firestoreService.setUserProfile(user.uid, updates);
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      ...updates
+    } as UserProfile);
+
+    return newGroup;
+  }
+
+  async updateGroupNickname(groupId: string, nickname: string): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    const currentGroups = this.groups();
+    const updatedGroups = currentGroups.map(g =>
+      g.id === groupId ? { ...g, nickname } : g
+    );
+
+    await this.firestoreService.setUserProfile(user.uid, { groups: updatedGroups });
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      groups: updatedGroups
+    } as UserProfile);
+  }
+
+  async deleteGroup(groupId: string): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    const currentGroups = this.groups();
+    const updatedGroups = currentGroups.filter(g => g.id !== groupId);
+
+    const updates: Partial<UserProfile> = { groups: updatedGroups };
+
+    if (this.currentGroupId() === groupId) {
+      updates.currentGroupId = updatedGroups.length > 0 ? updatedGroups[0].id : undefined;
+    }
+
+    await this.firestoreService.setUserProfile(user.uid, updates);
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      ...updates
+    } as UserProfile);
+  }
+
+  async setCurrentGroup(groupId: string | null): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    await this.firestoreService.setUserProfile(user.uid, { currentGroupId: groupId || undefined });
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      currentGroupId: groupId || undefined
+    } as UserProfile);
+  }
+
   private getDefaultProfile(): UserProfile {
     return {
       callSign: '',
@@ -296,6 +398,7 @@ export class UserProfileService {
       displayName: '',
       radioSetups: [],
       savedLocations: [],
+      groups: [],
       useRepeater: false,
       simplexFrequency: '146.52',
       updatedAt: new Date()

@@ -287,14 +287,11 @@ export class HomeComponent implements OnInit, OnDestroy {
       filter: true
     },
     {
+      colId: 'distance',
       headerName: 'Distance',
       sortable: true,
       filter: true,
-      valueGetter: (params) => {
-        if (!params.data?.id) return null;
-        const distance = this.distanceCache.get(params.data.id);
-        return distance ?? null;
-      },
+      valueGetter: (params) => this.getDistance(params.data?.id),
       valueFormatter: (params) => {
         if (params.value === null || params.value === undefined) return '—';
         return `${params.value.toFixed(1)} mi`;
@@ -433,15 +430,17 @@ export class HomeComponent implements OnInit, OnDestroy {
     for (const report of this.rowData) {
       if (!report.id) continue;
 
-      const receiverLoc = report.location;
-      if (!receiverLoc?.latitude || !receiverLoc?.longitude) {
-        this.distanceCache.set(report.id, null);
-        continue;
-      }
+      // Look up both transmitter and receiver locations from HamDB (their QTH)
+      const [transmitterInfo, receiverInfo] = await Promise.all([
+        this.callsignLookup.lookupCallsign(report.transmitterCall),
+        this.callsignLookup.lookupCallsign(report.receiverCall)
+      ]);
 
-      // Try to get transmitter location from callsign lookup
-      const transmitterInfo = await this.callsignLookup.lookupCallsign(report.transmitterCall);
-      if (!transmitterInfo?.location?.latitude || !transmitterInfo?.location?.longitude) {
+      const transmitterLoc = transmitterInfo?.location;
+      const receiverLoc = receiverInfo?.location;
+
+      if (!transmitterLoc?.latitude || !transmitterLoc?.longitude ||
+          !receiverLoc?.latitude || !receiverLoc?.longitude) {
         this.distanceCache.set(report.id, null);
         continue;
       }
@@ -449,13 +448,18 @@ export class HomeComponent implements OnInit, OnDestroy {
       const distance = this.haversineDistance(
         receiverLoc.latitude,
         receiverLoc.longitude,
-        transmitterInfo.location.latitude,
-        transmitterInfo.location.longitude
+        transmitterLoc.latitude,
+        transmitterLoc.longitude
       );
       this.distanceCache.set(report.id, distance);
     }
 
-    this.gridApi?.refreshCells({ columns: ['Distance'], force: true });
+    this.gridApi?.refreshCells({ columns: ['distance'], force: true });
+  }
+
+  private getDistance(reportId: string | undefined): number | null {
+    if (!reportId) return null;
+    return this.distanceCache.get(reportId) ?? null;
   }
 
   private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -504,6 +508,9 @@ export class HomeComponent implements OnInit, OnDestroy {
       const repeaterInfo = this.userProfileService.repeaterInfo();
       const simplexFrequency = this.userProfileService.simplexFrequency();
 
+      // Get current group info
+      const currentGroup = this.userProfileService.currentGroup();
+
       // Build report object, filtering out undefined values (Firestore doesn't accept undefined)
       const report: any = {
         transmitterCall: this.transmitterCall.trim().toUpperCase(),
@@ -513,6 +520,12 @@ export class HomeComponent implements OnInit, OnDestroy {
         receiverUid: user.uid,
         useRepeater
       };
+
+      // Add group info if a group is selected
+      if (currentGroup) {
+        report.groupId = currentGroup.id;
+        report.groupNumber = currentGroup.groupNumber;
+      }
 
       // Add optional fields only if they have values
       if (currentRadio?.make) report.radioMake = currentRadio.make;

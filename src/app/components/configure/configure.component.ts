@@ -1,4 +1,4 @@
-import { Component, inject, signal, OnInit, computed } from '@angular/core';
+import { Component, inject, signal, OnInit, OnDestroy, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -15,11 +15,12 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { AgGridAngular } from 'ag-grid-angular';
 import { ColDef, GridReadyEvent, GridApi, ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import { Subscription } from 'rxjs';
 
 import { AuthService } from '../../services/auth.service';
 import { UserProfileService } from '../../services/user-profile.service';
 import { FirestoreService } from '../../services/firestore.service';
-import { RadioSetup, SavedLocation, RepeaterInfo, Location } from '../../models/signal-report.model';
+import { RadioSetup, SavedLocation, RepeaterInfo, Location, SignalGroup, SignalReport } from '../../models/signal-report.model';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -320,6 +321,128 @@ ModuleRegistry.registerModules([AllCommunityModule]);
           </div>
         </mat-card-content>
       </mat-card>
+
+      <!-- Groups Section -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>Signal Report Groups</mat-card-title>
+          <mat-card-subtitle>Organize your signal reports into groups</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <!-- Current Group Selection -->
+          @if (userProfileService.groups().length > 0) {
+            <div class="form-row current-radio">
+              <mat-form-field appearance="outline" class="flex-2">
+                <mat-label>Currently Active Group</mat-label>
+                <mat-select [(ngModel)]="selectedGroupId" (ngModelChange)="setCurrentGroup($event)">
+                  <mat-option [value]="null">-- None Selected --</mat-option>
+                  @for (group of userProfileService.groups(); track group.id) {
+                    <mat-option [value]="group.id">
+                      #{{ group.groupNumber }} - {{ group.nickname }}
+                    </mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <mat-divider></mat-divider>
+          }
+
+          <!-- Groups Grid -->
+          <div class="grid-container">
+            <ag-grid-angular
+              class="ag-theme-quartz"
+              [rowData]="groups()"
+              [columnDefs]="groupColumnDefs"
+              [defaultColDef]="defaultColDef"
+              [rowSelection]="'single'"
+              [domLayout]="'autoHeight'"
+              (gridReady)="onGroupGridReady($event)"
+              (rowClicked)="onGroupRowClicked($event)">
+            </ag-grid-angular>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <!-- Add/Edit Group Form -->
+          <h4>{{ editingGroup ? 'Edit' : 'Create New' }} Group</h4>
+          @if (editingGroup) {
+            <p class="group-number-display">Group Number: <strong>#{{ editingGroup.groupNumber }}</strong> (assigned by system)</p>
+          }
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="flex-2">
+              <mat-label>Group Nickname</mat-label>
+              <input matInput [(ngModel)]="groupForm.nickname" placeholder="e.g., Field Day 2026">
+            </mat-form-field>
+          </div>
+
+          <div class="form-actions">
+            @if (editingGroup) {
+              <button mat-raised-button color="primary" (click)="updateGroup()"
+                      [disabled]="!canSaveGroup()">
+                <mat-icon>save</mat-icon> Update Nickname
+              </button>
+              <button mat-stroked-button (click)="cancelGroupEdit()">Cancel</button>
+              <button mat-stroked-button color="warn" (click)="deleteGroup()">
+                <mat-icon>delete</mat-icon> Delete Group
+              </button>
+            } @else {
+              <button mat-raised-button color="primary" (click)="addGroup()"
+                      [disabled]="!canSaveGroup()">
+                <mat-icon>add</mat-icon> Create Group
+              </button>
+            }
+          </div>
+        </mat-card-content>
+      </mat-card>
+
+      <!-- Data Export Section -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>Export Data</mat-card-title>
+          <mat-card-subtitle>Download signal reports as CSV or JSON</mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="export-section">
+            <h4>Export All Data</h4>
+            <div class="form-actions">
+              <button mat-raised-button (click)="exportAllData('csv')">
+                <mat-icon>download</mat-icon> Download All (CSV)
+              </button>
+              <button mat-raised-button (click)="exportAllData('json')">
+                <mat-icon>download</mat-icon> Download All (JSON)
+              </button>
+            </div>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <div class="export-section">
+            <h4>Export Single Group</h4>
+            <div class="form-row">
+              <mat-form-field appearance="outline" class="flex-2">
+                <mat-label>Select Group to Export</mat-label>
+                <mat-select [(ngModel)]="exportGroupId">
+                  @for (group of userProfileService.groups(); track group.id) {
+                    <mat-option [value]="group.id">
+                      #{{ group.groupNumber }} - {{ group.nickname }}
+                    </mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <div class="form-actions">
+              <button mat-raised-button (click)="exportGroupData('csv')"
+                      [disabled]="!exportGroupId">
+                <mat-icon>download</mat-icon> Download Group (CSV)
+              </button>
+              <button mat-raised-button (click)="exportGroupData('json')"
+                      [disabled]="!exportGroupId">
+                <mat-icon>download</mat-icon> Download Group (JSON)
+              </button>
+            </div>
+          </div>
+        </mat-card-content>
+      </mat-card>
     </div>
   `,
   styles: [`
@@ -368,6 +491,16 @@ ModuleRegistry.registerModules([AllCommunityModule]);
       margin: 16px 0 8px 0;
       color: #333;
     }
+    .group-number-display {
+      color: #666;
+      margin-bottom: 8px;
+    }
+    .export-section {
+      margin: 16px 0;
+    }
+    .export-section h4 {
+      margin-bottom: 12px;
+    }
     @media (max-width: 600px) {
       .form-row {
         flex-direction: column;
@@ -378,12 +511,13 @@ ModuleRegistry.registerModules([AllCommunityModule]);
     }
   `]
 })
-export class ConfigureComponent implements OnInit {
+export class ConfigureComponent implements OnInit, OnDestroy {
   authService = inject(AuthService);
   userProfileService = inject(UserProfileService);
   private firestoreService = inject(FirestoreService);
   private snackBar = inject(MatSnackBar);
   private gridApi?: GridApi;
+  private reportsSubscription?: Subscription;
 
   // Call sign
   newCallSign = '';
@@ -437,6 +571,22 @@ export class ConfigureComponent implements OnInit {
     { field: 'description', headerName: 'Description', sortable: true, filter: true, flex: 2 }
   ];
 
+  // Groups
+  selectedGroupId: string | null = null;
+  groups = computed(() => this.userProfileService.groups());
+  editingGroup: SignalGroup | null = null;
+  groupForm = { nickname: '' };
+  private groupGridApi?: GridApi;
+
+  groupColumnDefs: ColDef[] = [
+    { field: 'groupNumber', headerName: '#', sortable: true, filter: true, width: 80 },
+    { field: 'nickname', headerName: 'Nickname', sortable: true, filter: true, flex: 2 }
+  ];
+
+  // Data export
+  exportGroupId: string | null = null;
+  allSignalReports: SignalReport[] = [];
+
   defaultColDef: ColDef = {
     flex: 1,
     minWidth: 100,
@@ -446,6 +596,11 @@ export class ConfigureComponent implements OnInit {
   ngOnInit(): void {
     this.loadCurrentValues();
     this.loadRepeaters();
+    this.loadSignalReports();
+  }
+
+  ngOnDestroy(): void {
+    this.reportsSubscription?.unsubscribe();
   }
 
   private loadCurrentValues(): void {
@@ -458,6 +613,7 @@ export class ConfigureComponent implements OnInit {
       this.repeaterCallSign = profile.repeaterInfo?.callSign || '';
       this.repeaterFrequency = profile.repeaterInfo?.frequency || '';
       this.selectedRadioId = profile.currentRadioId || null;
+      this.selectedGroupId = profile.currentGroupId || null;
     }
   }
 
@@ -730,5 +886,193 @@ export class ConfigureComponent implements OnInit {
     } catch (error) {
       this.snackBar.open('Error setting active radio', 'Dismiss', { duration: 3000 });
     }
+  }
+
+  // Groups
+  onGroupGridReady(params: GridReadyEvent): void {
+    this.groupGridApi = params.api;
+  }
+
+  onGroupRowClicked(event: any): void {
+    this.editingGroup = event.data;
+    this.groupForm = { nickname: event.data.nickname || '' };
+  }
+
+  canSaveGroup(): boolean {
+    return !!(this.groupForm.nickname.trim());
+  }
+
+  async addGroup(): Promise<void> {
+    if (!this.canSaveGroup()) return;
+
+    try {
+      const newGroup = await this.userProfileService.addGroup(this.groupForm.nickname.trim());
+      this.clearGroupForm();
+      this.snackBar.open(`Group #${newGroup.groupNumber} created`, 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snackBar.open('Error creating group', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async updateGroup(): Promise<void> {
+    if (!this.editingGroup || !this.canSaveGroup()) return;
+
+    try {
+      await this.userProfileService.updateGroupNickname(this.editingGroup.id, this.groupForm.nickname.trim());
+      this.clearGroupForm();
+      this.snackBar.open('Group nickname updated', 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snackBar.open('Error updating group', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async deleteGroup(): Promise<void> {
+    if (!this.editingGroup) return;
+
+    try {
+      await this.userProfileService.deleteGroup(this.editingGroup.id);
+      this.clearGroupForm();
+      this.snackBar.open('Group deleted', 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snackBar.open('Error deleting group', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  cancelGroupEdit(): void {
+    this.clearGroupForm();
+  }
+
+  private clearGroupForm(): void {
+    this.editingGroup = null;
+    this.groupForm = { nickname: '' };
+    this.groupGridApi?.deselectAll();
+  }
+
+  async setCurrentGroup(groupId: string | null): Promise<void> {
+    try {
+      await this.userProfileService.setCurrentGroup(groupId);
+      this.snackBar.open('Active group updated', 'Dismiss', { duration: 2000 });
+    } catch (error) {
+      this.snackBar.open('Error setting active group', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  // Data Export
+  private loadSignalReports(): void {
+    this.reportsSubscription = this.firestoreService.getSignalReports().subscribe({
+      next: (reports) => {
+        this.allSignalReports = reports;
+      },
+      error: (error) => {
+        console.error('Error loading signal reports:', error);
+      }
+    });
+  }
+
+  exportAllData(format: 'csv' | 'json'): void {
+    if (this.allSignalReports.length === 0) {
+      this.snackBar.open('No data to export', 'Dismiss', { duration: 3000 });
+      return;
+    }
+
+    const data = this.prepareExportData(this.allSignalReports);
+    this.downloadFile(data, `signal-reports-all`, format);
+  }
+
+  exportGroupData(format: 'csv' | 'json'): void {
+    if (!this.exportGroupId) return;
+
+    const groupReports = this.allSignalReports.filter(r => r.groupId === this.exportGroupId);
+    if (groupReports.length === 0) {
+      this.snackBar.open('No reports in this group', 'Dismiss', { duration: 3000 });
+      return;
+    }
+
+    const group = this.userProfileService.groups().find(g => g.id === this.exportGroupId);
+    const filename = group ? `signal-reports-group-${group.groupNumber}` : 'signal-reports-group';
+
+    const data = this.prepareExportData(groupReports);
+    this.downloadFile(data, filename, format);
+  }
+
+  private prepareExportData(reports: SignalReport[]): any[] {
+    return reports.map(r => ({
+      transmitterCall: r.transmitterCall,
+      signalHeard: r.signalHeard,
+      time: this.formatDateForExport(r.time),
+      receiverCall: r.receiverCall,
+      groupNumber: r.groupNumber || '',
+      frequency: r.useRepeater
+        ? `${r.repeaterCallSign || ''} ${r.repeaterFrequency || ''}`.trim()
+        : r.simplexFrequency || '',
+      frequencyType: r.useRepeater ? 'Repeater' : 'Simplex',
+      radioMake: r.radioMake || '',
+      radioModel: r.radioModel || '',
+      antenna: r.antenna || '',
+      locationAddress: r.location?.address || '',
+      locationLat: r.location?.latitude || '',
+      locationLong: r.location?.longitude || ''
+    }));
+  }
+
+  private formatDateForExport(value: any): string {
+    if (!value) return '';
+    let date: Date;
+    if (value.toDate) {
+      date = value.toDate();
+    } else if (value instanceof Date) {
+      date = value;
+    } else {
+      date = new Date(value);
+    }
+    return date.toISOString();
+  }
+
+  private downloadFile(data: any[], filename: string, format: 'csv' | 'json'): void {
+    let content: string;
+    let mimeType: string;
+    let extension: string;
+
+    if (format === 'json') {
+      content = JSON.stringify(data, null, 2);
+      mimeType = 'application/json';
+      extension = 'json';
+    } else {
+      content = this.convertToCSV(data);
+      mimeType = 'text/csv';
+      extension = 'csv';
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filename}.${extension}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    this.snackBar.open(`Downloaded ${filename}.${extension}`, 'Dismiss', { duration: 3000 });
+  }
+
+  private convertToCSV(data: any[]): string {
+    if (data.length === 0) return '';
+
+    const headers = Object.keys(data[0]);
+    const csvRows = [
+      headers.join(','),
+      ...data.map(row =>
+        headers.map(header => {
+          const value = row[header];
+          // Escape quotes and wrap in quotes if needed
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(',')
+      )
+    ];
+    return csvRows.join('\n');
   }
 }

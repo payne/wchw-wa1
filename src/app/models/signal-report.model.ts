@@ -1,5 +1,12 @@
 import { Timestamp } from '@angular/fire/firestore';
 
+export interface SignalGroup {
+  id: string;
+  groupNumber: number;
+  nickname: string;
+  createdAt: Timestamp | Date;
+}
+
 export interface RadioSetup {
   id: string;
   nickname: string;
@@ -38,6 +45,8 @@ export interface UserProfile {
   currentRadioId?: string;
   savedLocations: SavedLocation[];
   currentLocationId?: string;
+  groups: SignalGroup[];
+  currentGroupId?: string;
   useRepeater: boolean;
   repeaterInfo?: RepeaterInfo;
   simplexFrequency: string;
@@ -51,6 +60,9 @@ export interface SignalReport {
   time: Timestamp | Date;
   receiverCall: string;
   receiverUid: string;
+  // Group info
+  groupId?: string;
+  groupNumber?: number;
   // Radio setup info
   radioMake?: string;
   radioModel?: string;
