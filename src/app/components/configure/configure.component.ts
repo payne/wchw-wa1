@@ -20,6 +20,8 @@ import { Subscription } from 'rxjs';
 import { AuthService } from '../../services/auth.service';
 import { UserProfileService } from '../../services/user-profile.service';
 import { FirestoreService } from '../../services/firestore.service';
+import { AdminService } from '../../services/admin.service';
+import { OpenGroupsService } from '../../services/open-groups.service';
 import { RadioSetup, SavedLocation, RepeaterInfo, Location, SignalGroup, SignalReport } from '../../models/signal-report.model';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -375,6 +377,14 @@ ModuleRegistry.registerModules([AllCommunityModule]);
             </mat-form-field>
           </div>
 
+          @if (canCreateOpenGroups()) {
+            <div class="form-row">
+              <mat-slide-toggle [(ngModel)]="groupForm.isOpen">
+                Open Group (anyone can join)
+              </mat-slide-toggle>
+            </div>
+          }
+
           <div class="form-actions">
             @if (editingGroup) {
               <button mat-raised-button color="primary" (click)="updateGroup()"
@@ -515,6 +525,8 @@ export class ConfigureComponent implements OnInit, OnDestroy {
   authService = inject(AuthService);
   userProfileService = inject(UserProfileService);
   private firestoreService = inject(FirestoreService);
+  private adminService = inject(AdminService);
+  private openGroupsService = inject(OpenGroupsService);
   private snackBar = inject(MatSnackBar);
   private gridApi?: GridApi;
   private reportsSubscription?: Subscription;
@@ -575,12 +587,14 @@ export class ConfigureComponent implements OnInit, OnDestroy {
   selectedGroupId: string | null = null;
   groups = computed(() => this.userProfileService.groups());
   editingGroup: SignalGroup | null = null;
-  groupForm = { nickname: '' };
+  groupForm = { nickname: '', isOpen: false };
   private groupGridApi?: GridApi;
 
   groupColumnDefs: ColDef[] = [
     { field: 'groupNumber', headerName: '#', sortable: true, filter: true, width: 80 },
-    { field: 'nickname', headerName: 'Nickname', sortable: true, filter: true, flex: 2 }
+    { field: 'nickname', headerName: 'Nickname', sortable: true, filter: true, flex: 2 },
+    { field: 'isOpen', headerName: 'Open', sortable: true, filter: true, width: 80,
+      valueFormatter: (params: any) => params.value ? 'Yes' : 'No' }
   ];
 
   // Data export
@@ -597,6 +611,7 @@ export class ConfigureComponent implements OnInit, OnDestroy {
     this.loadCurrentValues();
     this.loadRepeaters();
     this.loadSignalReports();
+    this.adminService.loadAdminConfig();
   }
 
   ngOnDestroy(): void {
@@ -895,7 +910,7 @@ export class ConfigureComponent implements OnInit, OnDestroy {
 
   onGroupRowClicked(event: any): void {
     this.editingGroup = event.data;
-    this.groupForm = { nickname: event.data.nickname || '' };
+    this.groupForm = { nickname: event.data.nickname || '', isOpen: event.data.isOpen || false };
   }
 
   canSaveGroup(): boolean {
@@ -906,7 +921,17 @@ export class ConfigureComponent implements OnInit, OnDestroy {
     if (!this.canSaveGroup()) return;
 
     try {
-      const newGroup = await this.userProfileService.addGroup(this.groupForm.nickname.trim());
+      const newGroup = await this.userProfileService.addGroup(this.groupForm.nickname.trim(), this.groupForm.isOpen);
+
+      // If open group, add to openGroups collection
+      if (this.groupForm.isOpen && this.canCreateOpenGroups()) {
+        const callSign = this.userProfileService.callSign() || '';
+        const user = this.authService.currentUser();
+        if (user) {
+          await this.openGroupsService.addOpenGroup(newGroup, user.uid, callSign);
+        }
+      }
+
       this.clearGroupForm();
       this.snackBar.open(`Group #${newGroup.groupNumber} created`, 'Dismiss', { duration: 3000 });
     } catch (error) {
@@ -944,8 +969,22 @@ export class ConfigureComponent implements OnInit, OnDestroy {
 
   private clearGroupForm(): void {
     this.editingGroup = null;
-    this.groupForm = { nickname: '' };
+    this.groupForm = { nickname: '', isOpen: false };
     this.groupGridApi?.deselectAll();
+  }
+
+  canCreateOpenGroups(): boolean {
+    const user = this.authService.currentUser();
+    if (!user) return false;
+
+    // Check if admin
+    if (this.adminService.isAdmin(user.email)) {
+      return true;
+    }
+
+    // Check if invited
+    const profile = this.userProfileService.profile();
+    return !!(profile?.invitedByUid);
   }
 
   async setCurrentGroup(groupId: string | null): Promise<void> {

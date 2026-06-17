@@ -4,6 +4,7 @@ export interface SignalGroup {
   id: string;
   groupNumber: number;
   nickname: string;
+  isOpen: boolean;
   createdAt: Timestamp | Date;
 }
 
@@ -51,6 +52,36 @@ export interface UserProfile {
   repeaterInfo?: RepeaterInfo;
   simplexFrequency: string;
   updatedAt: Timestamp | Date;
+  invitedByUid?: string;
+  invitedByEmail?: string;
+  invitedAt?: Timestamp | Date;
+}
+
+export interface Invitation {
+  id: string;
+  email: string;
+  inviterUid: string;
+  inviterEmail: string;
+  token: string;
+  status: 'pending' | 'accepted' | 'expired';
+  createdAt: Timestamp | Date;
+}
+
+export interface OpenGroupNotification {
+  id: string;
+  email: string;
+  uid: string;
+  createdAt: Timestamp | Date;
+}
+
+export interface OpenGroup {
+  id: string;
+  groupId: string;
+  groupNumber: number;
+  nickname: string;
+  ownerUid: string;
+  ownerCallSign: string;
+  createdAt: Timestamp | Date;
 }
 
 export interface SignalReport {

@@ -223,3 +223,37 @@
   - Restrict API key to specific domains in Google Cloud Console
   - Enable Firebase App Check for additional abuse protection
 - Created `security-review-summary.md` for easy reference
+
+### Feature: Invitation System and Open Groups
+- **Request**: Implement invitation-based access control with admin/invited/uninvited user tiers
+- **Actions Taken**:
+  - **Data Model Changes** (`signal-report.model.ts`):
+    - Added `isOpen` field to SignalGroup interface
+    - Added `invitedByUid`, `invitedByEmail`, `invitedAt` fields to UserProfile
+    - Created new interfaces: Invitation, OpenGroupNotification, OpenGroup
+  - **New Services**:
+    - `AdminService` - Checks admin status by email, loads config from `/config/admin`
+    - `InvitationService` - Create invitations, get by token, accept invitations, list pending
+    - `OpenGroupsService` - Load/add/remove open groups, subscribe to notifications
+  - **New Components**:
+    - `AcceptInvitationComponent` - Landing page for `/accept-invite/:token` URLs
+    - `NoOpenGroupsComponent` - Page for uninvited users when no open groups exist
+    - `OpenGroupsListComponent` - Lists available open groups for uninvited users
+    - `InviteUsersComponent` - Text area for emails, generates copyable invite URLs
+  - **Guards**:
+    - Rewrote `authGuard` with tiered access logic (admin -> invited -> open groups -> no groups)
+    - Added `uninvitedOnlyGuard` for routes only uninvited users should access
+    - Created `invitedUserGuard` for invite-only routes (/invite)
+  - **Route Updates** (`app.routes.ts`):
+    - `/accept-invite/:token` - Public invitation acceptance
+    - `/no-open-groups` - Notification signup for uninvited users
+    - `/open-groups` - List of open groups for uninvited users
+    - `/invite` - Invite users (admin/invited only)
+  - **UI Updates**:
+    - Added "Invite Users" link to nav menu (visible to admin/invited users)
+    - Added "Open Group" toggle to group creation in Configure component
+    - Added "Open" column to groups grid in Configure component
+  - **Firestore Rules** (`firestore.rules`):
+    - Added rules for `/config/admin`, `/invitations`, `/openGroups`, `/openGroupNotifications`
+    - Helper functions: isAdmin(), isInvited(), canInvite()
+- **Admin Emails**: matt.n3pay@gmail.com, jim.kx0u@gmail.com (configured in `/config/admin`)

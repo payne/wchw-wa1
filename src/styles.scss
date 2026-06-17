@@ -4,4 +4,149 @@
 @import 'leaflet/dist/leaflet.css';
 
 html, body { height: 100%; }
-body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+body {
+  margin: 0;
+  font-family: Roboto, "Helvetica Neue", sans-serif;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Light theme (default) */
+body {
+  background-color: #fafafa;
+  color: rgba(0, 0, 0, 0.87);
+}
+
+/* Dark theme */
+body.dark-theme {
+  background-color: #303030;
+  color: rgba(255, 255, 255, 0.87);
+
+  /* Material card overrides */
+  .mat-mdc-card {
+    background-color: #424242;
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Form field overrides */
+  .mat-mdc-form-field {
+    --mdc-filled-text-field-container-color: #424242;
+    --mdc-outlined-text-field-outline-color: rgba(255, 255, 255, 0.38);
+    --mdc-outlined-text-field-focus-outline-color: #90caf9;
+    --mdc-outlined-text-field-hover-outline-color: rgba(255, 255, 255, 0.6);
+    --mdc-outlined-text-field-label-text-color: rgba(255, 255, 255, 0.6);
+    --mdc-outlined-text-field-input-text-color: rgba(255, 255, 255, 0.87);
+  }
+
+  .mat-mdc-text-field-wrapper {
+    background-color: transparent;
+  }
+
+  /* Input text */
+  input.mat-mdc-input-element,
+  textarea.mat-mdc-input-element {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Select */
+  .mat-mdc-select-value {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  .mat-mdc-select-arrow {
+    color: rgba(255, 255, 255, 0.54);
+  }
+
+  /* Menu */
+  .mat-mdc-menu-panel {
+    background-color: #424242;
+  }
+
+  .mat-mdc-menu-item {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Snackbar */
+  .mat-mdc-snack-bar-container {
+    --mdc-snackbar-container-color: #323232;
+    --mdc-snackbar-supporting-text-color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Dialog */
+  .mat-mdc-dialog-surface {
+    background-color: #424242;
+  }
+
+  /* List */
+  .mat-mdc-list-item {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Divider */
+  .mat-divider {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  /* Hints and subtitles */
+  .mat-hint,
+  .mat-mdc-form-field-hint,
+  .mat-card-subtitle,
+  .mat-mdc-card-subtitle {
+    color: rgba(255, 255, 255, 0.54);
+  }
+
+  /* Radio and slide toggle */
+  .mat-mdc-radio-button {
+    --mdc-radio-unselected-icon-color: rgba(255, 255, 255, 0.54);
+  }
+
+  /* AG Grid dark theme */
+  .ag-theme-quartz {
+    --ag-background-color: #424242;
+    --ag-foreground-color: rgba(255, 255, 255, 0.87);
+    --ag-header-background-color: #383838;
+    --ag-odd-row-background-color: #3a3a3a;
+    --ag-row-hover-color: #4a4a4a;
+    --ag-border-color: rgba(255, 255, 255, 0.12);
+    --ag-secondary-foreground-color: rgba(255, 255, 255, 0.54);
+  }
+
+  /* Icons in cards */
+  mat-icon {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  /* Links */
+  a {
+    color: #90caf9;
+  }
+
+  /* Buttons */
+  .mat-mdc-outlined-button:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.38);
+  }
+
+  /* Tooltip */
+  .mat-mdc-tooltip {
+    --mdc-plain-tooltip-container-color: #616161;
+    --mdc-plain-tooltip-supporting-text-color: white;
+  }
+
+  /* Autocomplete */
+  .mat-mdc-autocomplete-panel {
+    background-color: #424242;
+  }
+
+  /* Option */
+  .mat-mdc-option {
+    color: rgba(255, 255, 255, 0.87);
+  }
+
+  .mat-mdc-option:hover:not(.mdc-list-item--disabled) {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  /* Progress spinner */
+  .mat-mdc-progress-spinner {
+    --mdc-circular-progress-active-indicator-color: #90caf9;
+  }
+}

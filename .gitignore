@@ -67,3 +67,7 @@ node_modules/
 /cli/lsr-mac-intel
 /cli/lsr-mac-arm
 /cli/deno.lock
+
+# Firestore backups (keep the directory, ignore contents)
+/backup/*
+!/backup/.gitkeep

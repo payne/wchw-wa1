@@ -299,7 +299,7 @@ export class UserProfileService {
   }
 
   // Groups
-  async addGroup(nickname: string): Promise<SignalGroup> {
+  async addGroup(nickname: string, isOpen: boolean = false): Promise<SignalGroup> {
     const user = this.authService.currentUser();
     if (!user) throw new Error('User not authenticated');
 
@@ -312,6 +312,7 @@ export class UserProfileService {
       id: crypto.randomUUID(),
       groupNumber: nextNumber,
       nickname: nickname,
+      isOpen: isOpen,
       createdAt: new Date()
     };
 
