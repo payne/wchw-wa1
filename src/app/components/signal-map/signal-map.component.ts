@@ -1,7 +1,8 @@
-import { Component, Input, OnInit, OnChanges, OnDestroy, SimpleChanges, AfterViewInit, ElementRef, ViewChild } from '@angular/core';
+import { Component, Input, OnInit, OnChanges, OnDestroy, SimpleChanges, AfterViewInit, ElementRef, ViewChild, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import * as L from 'leaflet';
 import { SignalReport, Location } from '../../models/signal-report.model';
+import { CallsignLookupService, CallsignInfo } from '../../services/callsign-lookup.service';
 
 // Fix for default marker icons in Leaflet with bundlers
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -14,8 +15,10 @@ L.Icon.Default.mergeOptions({
 interface StationInfo {
   callSign: string;
   location: Location;
+  name?: string;
   reportsReceived: number;
   reportsTransmitted: number;
+  isLookedUp: boolean; // true if location came from API lookup
 }
 
 interface SignalPath {
@@ -36,16 +39,27 @@ interface SignalPath {
   template: `
     <div class="map-container">
       <div #mapElement class="map"></div>
+      @if (isLoading()) {
+        <div class="loading-overlay">
+          <span>Looking up callsigns...</span>
+        </div>
+      }
       <div class="map-legend">
         <h4>Legend</h4>
         <div class="legend-item">
-          <span class="legend-marker station"></span> Station
+          <span class="legend-marker station"></span> Station (reported)
+        </div>
+        <div class="legend-item">
+          <span class="legend-marker station-lookup"></span> Station (FCC lookup)
         </div>
         <div class="legend-item">
           <span class="legend-line simplex"></span> Simplex
         </div>
         <div class="legend-item">
           <span class="legend-line repeater"></span> Repeater
+        </div>
+        <div class="legend-stats">
+          {{ stationCount() }} stations, {{ pathCount() }} paths
         </div>
       </div>
     </div>
@@ -62,6 +76,17 @@ interface SignalPath {
       height: 100%;
       min-height: 400px;
       border-radius: 4px;
+    }
+    .loading-overlay {
+      position: absolute;
+      top: 10px;
+      right: 50px;
+      background: rgba(33, 150, 243, 0.9);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 4px;
+      z-index: 1000;
+      font-size: 12px;
     }
     .map-legend {
       position: absolute;
@@ -93,6 +118,10 @@ interface SignalPath {
       background: #2196F3;
       border: 2px solid #1565C0;
     }
+    .legend-marker.station-lookup {
+      background: #9C27B0;
+      border: 2px solid #7B1FA2;
+    }
     .legend-line {
       width: 24px;
       height: 3px;
@@ -103,18 +132,35 @@ interface SignalPath {
     .legend-line.repeater {
       background: #FF9800;
     }
+    .legend-stats {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #eee;
+      color: #666;
+      font-size: 11px;
+    }
   `]
 })
 export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnDestroy {
   @ViewChild('mapElement') mapElement!: ElementRef;
   @Input() reports: SignalReport[] = [];
 
+  private callsignLookup = inject(CallsignLookupService);
+
   private map!: L.Map;
-  private stationsLayer!: L.LayerGroup;
+  private reportedStationsLayer!: L.LayerGroup;
+  private lookedUpStationsLayer!: L.LayerGroup;
   private simplexPathsLayer!: L.LayerGroup;
   private repeaterPathsLayer!: L.LayerGroup;
   private layerControl!: L.Control.Layers;
   private initialized = false;
+
+  isLoading = signal(false);
+  stationCount = signal(0);
+  pathCount = signal(0);
+
+  // Cache for looked up locations
+  private lookupCache = new Map<string, Location | null>();
 
   ngOnInit(): void {}
 
@@ -147,13 +193,15 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
     }).addTo(this.map);
 
     // Create layer groups
-    this.stationsLayer = L.layerGroup().addTo(this.map);
+    this.reportedStationsLayer = L.layerGroup().addTo(this.map);
+    this.lookedUpStationsLayer = L.layerGroup().addTo(this.map);
     this.simplexPathsLayer = L.layerGroup().addTo(this.map);
     this.repeaterPathsLayer = L.layerGroup().addTo(this.map);
 
     // Add layer control
     const overlays = {
-      'Stations': this.stationsLayer,
+      'Stations (Reported)': this.reportedStationsLayer,
+      'Stations (FCC Lookup)': this.lookedUpStationsLayer,
       'Simplex Paths': this.simplexPathsLayer,
       'Repeater Paths': this.repeaterPathsLayer
     };
@@ -163,35 +211,53 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
     this.updateMapData();
   }
 
-  private updateMapData(): void {
+  private async updateMapData(): Promise<void> {
     if (!this.initialized || !this.reports) return;
 
     // Clear existing layers
-    this.stationsLayer.clearLayers();
+    this.reportedStationsLayer.clearLayers();
+    this.lookedUpStationsLayer.clearLayers();
     this.simplexPathsLayer.clearLayers();
     this.repeaterPathsLayer.clearLayers();
 
-    // Extract stations and paths from reports
-    const stations = this.extractStations();
-    const paths = this.extractPaths();
+    // Extract stations from reports (those with location data)
+    const reportedStations = this.extractReportedStations();
 
-    // Add station markers
-    this.addStationMarkers(stations);
+    // Find callsigns that need lookup
+    const callsignsNeedingLookup = this.findCallsignsNeedingLookup(reportedStations);
 
-    // Add signal path lines
+    // Look up missing callsigns
+    if (callsignsNeedingLookup.length > 0) {
+      this.isLoading.set(true);
+      await this.lookupCallsigns(callsignsNeedingLookup);
+      this.isLoading.set(false);
+    }
+
+    // Merge reported stations with looked up stations
+    const allStations = this.mergeStations(reportedStations);
+
+    // Extract paths using all available location data
+    const paths = this.extractPaths(allStations);
+
+    // Add markers and paths to map
+    this.addStationMarkers(allStations);
     this.addSignalPaths(paths);
 
+    // Update stats
+    this.stationCount.set(allStations.size);
+    this.pathCount.set(paths.length);
+
     // Fit map to bounds if we have data
-    if (stations.size > 0) {
-      this.fitMapToBounds(stations);
+    if (allStations.size > 0) {
+      this.fitMapToBounds(allStations);
     }
   }
 
-  private extractStations(): Map<string, StationInfo> {
+  private extractReportedStations(): Map<string, StationInfo> {
     const stations = new Map<string, StationInfo>();
 
     for (const report of this.reports) {
-      // Add receiver station
+      // Add receiver station if they have location
       if (report.location?.latitude && report.location?.longitude) {
         const existing = stations.get(report.receiverCall);
         if (existing) {
@@ -201,23 +267,104 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
             callSign: report.receiverCall,
             location: report.location,
             reportsReceived: 1,
-            reportsTransmitted: 0
+            reportsTransmitted: 0,
+            isLookedUp: false
           });
         }
       }
-
-      // We don't have transmitter location in the report, so we can only show
-      // stations that have submitted reports (receivers)
     }
 
     return stations;
   }
 
-  private extractPaths(): SignalPath[] {
+  private findCallsignsNeedingLookup(reportedStations: Map<string, StationInfo>): string[] {
+    const needLookup = new Set<string>();
+
+    for (const report of this.reports) {
+      // Check transmitter
+      if (!reportedStations.has(report.transmitterCall) && !this.lookupCache.has(report.transmitterCall)) {
+        needLookup.add(report.transmitterCall);
+      }
+      // Check receiver (if they didn't report location)
+      if (!reportedStations.has(report.receiverCall) && !this.lookupCache.has(report.receiverCall)) {
+        needLookup.add(report.receiverCall);
+      }
+    }
+
+    return Array.from(needLookup);
+  }
+
+  private async lookupCallsigns(callsigns: string[]): Promise<void> {
+    const results = await this.callsignLookup.lookupMultiple(callsigns);
+
+    results.forEach((info, callSign) => {
+      if (info && info.location) {
+        this.lookupCache.set(callSign, info.location);
+      } else {
+        this.lookupCache.set(callSign, null);
+      }
+    });
+  }
+
+  private mergeStations(reportedStations: Map<string, StationInfo>): Map<string, StationInfo> {
+    const allStations = new Map(reportedStations);
+
+    // Count transmissions for each station
+    for (const report of this.reports) {
+      const station = allStations.get(report.transmitterCall);
+      if (station) {
+        station.reportsTransmitted++;
+      }
+    }
+
+    // Add looked up stations that aren't in reported stations
+    for (const report of this.reports) {
+      // Add transmitter if we have lookup data
+      if (!allStations.has(report.transmitterCall)) {
+        const lookedUpLocation = this.lookupCache.get(report.transmitterCall);
+        if (lookedUpLocation) {
+          const existing = allStations.get(report.transmitterCall);
+          if (existing) {
+            existing.reportsTransmitted++;
+          } else {
+            allStations.set(report.transmitterCall, {
+              callSign: report.transmitterCall,
+              location: lookedUpLocation,
+              reportsReceived: 0,
+              reportsTransmitted: 1,
+              isLookedUp: true
+            });
+          }
+        }
+      }
+
+      // Add receiver if we have lookup data (and they didn't report location)
+      if (!allStations.has(report.receiverCall)) {
+        const lookedUpLocation = this.lookupCache.get(report.receiverCall);
+        if (lookedUpLocation) {
+          allStations.set(report.receiverCall, {
+            callSign: report.receiverCall,
+            location: lookedUpLocation,
+            reportsReceived: 1,
+            reportsTransmitted: 0,
+            isLookedUp: true
+          });
+        }
+      }
+    }
+
+    return allStations;
+  }
+
+  private extractPaths(stations: Map<string, StationInfo>): SignalPath[] {
     const pathMap = new Map<string, SignalPath>();
 
     for (const report of this.reports) {
-      if (!report.location?.latitude || !report.location?.longitude) continue;
+      const fromStation = stations.get(report.transmitterCall);
+      const toStation = stations.get(report.receiverCall);
+
+      if (!fromStation?.location?.latitude || !fromStation?.location?.longitude) continue;
+      if (!toStation?.location?.latitude || !toStation?.location?.longitude) continue;
 
       // Create path key (sorted to make it bidirectional)
       const calls = [report.transmitterCall, report.receiverCall].sort();
@@ -226,48 +373,28 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
       const existing = pathMap.get(key);
       if (existing) {
         existing.count++;
-        // Update to most recent signal strength
         existing.signalStrength = report.signalHeard;
       } else {
-        // For now, we only have receiver location
-        // We'll need to look up transmitter location from other reports
-        const transmitterStation = this.findStationLocation(report.transmitterCall);
-
-        if (transmitterStation) {
-          pathMap.set(key, {
-            fromCall: report.transmitterCall,
-            toCall: report.receiverCall,
-            fromLocation: transmitterStation,
-            toLocation: report.location,
-            signalStrength: report.signalHeard,
-            count: 1,
-            useRepeater: report.useRepeater,
-            repeaterInfo: report.useRepeater ?
-              `${report.repeaterCallSign || ''} ${report.repeaterFrequency || ''}`.trim() :
-              undefined
-          });
-        }
+        pathMap.set(key, {
+          fromCall: report.transmitterCall,
+          toCall: report.receiverCall,
+          fromLocation: fromStation.location,
+          toLocation: toStation.location,
+          signalStrength: report.signalHeard,
+          count: 1,
+          useRepeater: report.useRepeater,
+          repeaterInfo: report.useRepeater ?
+            `${report.repeaterCallSign || ''} ${report.repeaterFrequency || ''}`.trim() :
+            undefined
+        });
       }
     }
 
     return Array.from(pathMap.values());
   }
 
-  private findStationLocation(callSign: string): Location | null {
-    // Look through reports to find this station's location
-    // (when they were a receiver and logged their location)
-    for (const report of this.reports) {
-      if (report.receiverCall === callSign &&
-          report.location?.latitude &&
-          report.location?.longitude) {
-        return report.location;
-      }
-    }
-    return null;
-  }
-
   private addStationMarkers(stations: Map<string, StationInfo>): void {
-    const stationIcon = L.divIcon({
+    const reportedIcon = L.divIcon({
       className: 'station-marker',
       html: `<div style="
         background: #2196F3;
@@ -280,23 +407,42 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
       iconAnchor: [8, 8]
     });
 
+    const lookedUpIcon = L.divIcon({
+      className: 'station-marker-lookup',
+      html: `<div style="
+        background: #9C27B0;
+        border: 2px solid #7B1FA2;
+        border-radius: 50%;
+        width: 12px;
+        height: 12px;
+      "></div>`,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+
     stations.forEach((station, callSign) => {
       if (station.location.latitude && station.location.longitude) {
+        const icon = station.isLookedUp ? lookedUpIcon : reportedIcon;
         const marker = L.marker(
           [station.location.latitude, station.location.longitude],
-          { icon: stationIcon }
+          { icon }
         );
 
         // Create popup content
+        const sourceText = station.isLookedUp ? '(FCC lookup)' : '(reported)';
         const popupContent = `
-          <strong>${callSign}</strong><br>
+          <strong>${callSign}</strong> ${sourceText}<br>
           ${station.location.address || ''}<br>
-          Reports received: ${station.reportsReceived}
+          Received: ${station.reportsReceived} | Transmitted: ${station.reportsTransmitted}
         `;
         marker.bindPopup(popupContent);
         marker.bindTooltip(callSign, { permanent: false, direction: 'top' });
 
-        this.stationsLayer.addLayer(marker);
+        if (station.isLookedUp) {
+          this.lookedUpStationsLayer.addLayer(marker);
+        } else {
+          this.reportedStationsLayer.addLayer(marker);
+        }
       }
     });
   }
@@ -314,7 +460,7 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
       ];
 
       const color = path.useRepeater ? '#FF9800' : '#4CAF50';
-      const weight = Math.min(2 + path.count, 6); // Thicker lines for more reports
+      const weight = Math.min(2 + path.count, 6);
 
       const polyline = L.polyline(latlngs, {
         color: color,
@@ -322,7 +468,6 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
         opacity: 0.7
       });
 
-      // Add popup with path info
       const popupContent = `
         <strong>${path.fromCall} ↔ ${path.toCall}</strong><br>
         Signal: ${path.signalStrength}<br>
@@ -353,7 +498,6 @@ export class SignalMapComponent implements OnInit, AfterViewInit, OnChanges, OnD
     }
   }
 
-  // Public method to refresh the map size (useful when container changes)
   public invalidateSize(): void {
     if (this.map) {
       setTimeout(() => this.map.invalidateSize(), 100);

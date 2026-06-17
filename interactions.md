@@ -88,3 +88,23 @@
   - Added map to Home component between form and grid
   - Component is standalone for easy reuse/relocation
   - Deployed to Firebase
+
+### Feature: Swappable Map/Table Positions
+- **Request**: Allow map and table positions to be swapped
+- **Action**: Added toggle button using ng-template to swap display order of map and table cards
+
+### Feature: Callsign Location Lookup
+- **Request**: Use HamDB.org API to locate callsigns on map; use localStorage to cache results
+- **Actions Taken**:
+  - Created CallsignLookupService with:
+    - HamDB.org API integration for callsign location lookup
+    - Memory cache for fast repeated lookups
+    - localStorage persistence with 30-day expiry
+    - Batch lookup support with rate limiting
+  - Updated SignalMapComponent:
+    - Blue markers for stations with reported locations
+    - Purple markers for stations with FCC lookup locations
+    - Separate layer controls for reported vs lookup stations
+    - Loading indicator while looking up callsigns
+    - Updated legend to show both marker types
+  - Deployed to Firebase
