@@ -3,7 +3,7 @@ import { MatDialog } from '@angular/material/dialog';
 import { AuthService } from './auth.service';
 import { FirestoreService } from './firestore.service';
 import { CallSignDialogComponent } from '../components/call-sign-dialog/call-sign-dialog.component';
-import { UserProfile, RadioSetup, Location, RepeaterInfo } from '../models/signal-report.model';
+import { UserProfile, RadioSetup, SavedLocation, Location, RepeaterInfo } from '../models/signal-report.model';
 
 @Injectable({
   providedIn: 'root'
@@ -17,6 +17,8 @@ export class UserProfileService {
   readonly isLoading = signal(false);
 
   readonly callSign = computed(() => this.profile()?.callSign || null);
+
+  // Radio setups
   readonly radioSetups = computed(() => this.profile()?.radioSetups || []);
   readonly currentRadioId = computed(() => this.profile()?.currentRadioId || null);
   readonly currentRadio = computed(() => {
@@ -24,7 +26,25 @@ export class UserProfileService {
     const currentId = this.currentRadioId();
     return setups.find(r => r.id === currentId) || null;
   });
-  readonly location = computed(() => this.profile()?.location || null);
+
+  // Saved locations
+  readonly savedLocations = computed(() => this.profile()?.savedLocations || []);
+  readonly currentLocationId = computed(() => this.profile()?.currentLocationId || null);
+  readonly currentLocation = computed(() => {
+    const locations = this.savedLocations();
+    const currentId = this.currentLocationId();
+    return locations.find(l => l.id === currentId) || null;
+  });
+  readonly location = computed((): Location | null => {
+    const current = this.currentLocation();
+    if (!current) return null;
+    return {
+      address: current.address,
+      latitude: current.latitude,
+      longitude: current.longitude
+    };
+  });
+
   readonly useRepeater = computed(() => this.profile()?.useRepeater || false);
   readonly repeaterInfo = computed(() => this.profile()?.repeaterInfo || null);
   readonly simplexFrequency = computed(() => this.profile()?.simplexFrequency || '146.52');
@@ -90,6 +110,7 @@ export class UserProfileService {
     } as UserProfile);
   }
 
+  // Radio Setups
   async addRadioSetup(setup: Omit<RadioSetup, 'id' | 'createdAt'>): Promise<void> {
     const user = this.authService.currentUser();
     if (!user) return;
@@ -139,7 +160,6 @@ export class UserProfileService {
 
     const updates: Partial<UserProfile> = { radioSetups: updatedSetups };
 
-    // If we're deleting the current radio, clear the selection
     if (this.currentRadioId() === id) {
       updates.currentRadioId = undefined;
     }
@@ -168,20 +188,85 @@ export class UserProfileService {
     } as UserProfile);
   }
 
-  async setLocation(location: Location): Promise<void> {
+  // Saved Locations
+  async addLocation(location: Omit<SavedLocation, 'id' | 'createdAt'>): Promise<void> {
     const user = this.authService.currentUser();
     if (!user) return;
 
-    await this.firestoreService.setUserProfile(user.uid, { location });
+    const newLocation: SavedLocation = {
+      ...location,
+      id: crypto.randomUUID(),
+      createdAt: new Date()
+    };
+
+    const currentLocations = this.savedLocations();
+    const updatedLocations = [...currentLocations, newLocation];
+
+    await this.firestoreService.setUserProfile(user.uid, { savedLocations: updatedLocations });
 
     const currentProfile = this.profile();
     this.profile.set({
       ...this.getDefaultProfile(),
       ...currentProfile,
-      location
+      savedLocations: updatedLocations
     } as UserProfile);
   }
 
+  async updateLocation(location: SavedLocation): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    const currentLocations = this.savedLocations();
+    const updatedLocations = currentLocations.map(l => l.id === location.id ? location : l);
+
+    await this.firestoreService.setUserProfile(user.uid, { savedLocations: updatedLocations });
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      savedLocations: updatedLocations
+    } as UserProfile);
+  }
+
+  async deleteLocation(id: string): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    const currentLocations = this.savedLocations();
+    const updatedLocations = currentLocations.filter(l => l.id !== id);
+
+    const updates: Partial<UserProfile> = { savedLocations: updatedLocations };
+
+    if (this.currentLocationId() === id) {
+      updates.currentLocationId = undefined;
+    }
+
+    await this.firestoreService.setUserProfile(user.uid, updates);
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      ...updates
+    } as UserProfile);
+  }
+
+  async setCurrentLocation(locationId: string | null): Promise<void> {
+    const user = this.authService.currentUser();
+    if (!user) return;
+
+    await this.firestoreService.setUserProfile(user.uid, { currentLocationId: locationId || undefined });
+
+    const currentProfile = this.profile();
+    this.profile.set({
+      ...this.getDefaultProfile(),
+      ...currentProfile,
+      currentLocationId: locationId || undefined
+    } as UserProfile);
+  }
+
+  // Repeater Mode
   async setRepeaterMode(useRepeater: boolean, repeaterInfo?: RepeaterInfo, simplexFrequency?: string): Promise<void> {
     const user = this.authService.currentUser();
     if (!user) return;
@@ -210,6 +295,7 @@ export class UserProfileService {
       email: '',
       displayName: '',
       radioSetups: [],
+      savedLocations: [],
       useRepeater: false,
       simplexFrequency: '146.52',
       updatedAt: new Date()

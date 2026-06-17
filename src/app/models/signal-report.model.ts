@@ -2,6 +2,7 @@ import { Timestamp } from '@angular/fire/firestore';
 
 export interface RadioSetup {
   id: string;
+  nickname: string;
   make: string;
   model: string;
   antenna: string;
@@ -15,6 +16,15 @@ export interface Location {
   longitude?: number;
 }
 
+export interface SavedLocation {
+  id: string;
+  nickname: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  createdAt: Timestamp | Date;
+}
+
 export interface RepeaterInfo {
   callSign: string;
   frequency: string;
@@ -26,7 +36,8 @@ export interface UserProfile {
   displayName: string;
   radioSetups: RadioSetup[];
   currentRadioId?: string;
-  location?: Location;
+  savedLocations: SavedLocation[];
+  currentLocationId?: string;
   useRepeater: boolean;
   repeaterInfo?: RepeaterInfo;
   simplexFrequency: string;

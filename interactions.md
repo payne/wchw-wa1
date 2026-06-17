@@ -51,3 +51,21 @@
   - Added Frequency and Radio columns to signal reports grid
   - Updated firestore.rules to allow repeaters collection access
   - Deployed to Firebase
+
+### Bug Fix: Firestore undefined field error
+- **Issue**: Submit report failed with "Unsupported field value: undefined" error
+- **Fix**: Updated submitReport to build report object incrementally, only including fields with actual values
+
+### Feature: Nicknames for Radio Setups and Locations
+- **Request**: Add nicknames to radio setups and locations; select current by nickname dropdown
+- **Actions Taken**:
+  - Added `nickname` field to RadioSetup model
+  - Added `SavedLocation` interface with id, nickname, address, lat/long
+  - Updated UserProfile to use savedLocations[] and currentLocationId instead of single location
+  - Updated UserProfileService with addLocation, updateLocation, deleteLocation, setCurrentLocation methods
+  - Updated Configure component:
+    - Radio dropdown now shows nickname only
+    - Added nickname field to radio form (required)
+    - Added Locations section with AG Grid (sortable/filterable), dropdown for current location
+    - Location form with nickname, address, lat/long, and "Use Current" geolocation button
+  - Deployed to Firebase

@@ -19,7 +19,7 @@ import { ColDef, GridReadyEvent, GridApi, ModuleRegistry, AllCommunityModule } f
 import { AuthService } from '../../services/auth.service';
 import { UserProfileService } from '../../services/user-profile.service';
 import { FirestoreService } from '../../services/firestore.service';
-import { RadioSetup, RepeaterInfo, Location } from '../../models/signal-report.model';
+import { RadioSetup, SavedLocation, RepeaterInfo, Location } from '../../models/signal-report.model';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -71,13 +71,57 @@ ModuleRegistry.registerModules([AllCommunityModule]);
       <!-- Location Section -->
       <mat-card>
         <mat-card-header>
-          <mat-card-title>Location</mat-card-title>
+          <mat-card-title>Locations</mat-card-title>
+          <mat-card-subtitle>Manage your operating locations</mat-card-subtitle>
         </mat-card-header>
         <mat-card-content>
+          <!-- Current Location Selection -->
+          @if (userProfileService.savedLocations().length > 0) {
+            <div class="form-row current-radio">
+              <mat-form-field appearance="outline" class="flex-2">
+                <mat-label>Currently Active Location</mat-label>
+                <mat-select [(ngModel)]="selectedLocationId" (ngModelChange)="setCurrentLocation($event)">
+                  <mat-option [value]="null">-- None Selected --</mat-option>
+                  @for (loc of userProfileService.savedLocations(); track loc.id) {
+                    <mat-option [value]="loc.id">
+                      {{ loc.nickname }}
+                    </mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+            <mat-divider></mat-divider>
+          }
+
+          <!-- Locations Grid -->
+          <div class="grid-container">
+            <ag-grid-angular
+              class="ag-theme-quartz"
+              [rowData]="savedLocations()"
+              [columnDefs]="locationColumnDefs"
+              [defaultColDef]="defaultColDef"
+              [rowSelection]="'single'"
+              [domLayout]="'autoHeight'"
+              (gridReady)="onLocationGridReady($event)"
+              (rowClicked)="onLocationRowClicked($event)">
+            </ag-grid-angular>
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <!-- Add/Edit Location Form -->
+          <h4>{{ editingLocation ? 'Edit' : 'Add' }} Location</h4>
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="flex-2">
+              <mat-label>Nickname</mat-label>
+              <input matInput [(ngModel)]="locationForm.nickname" placeholder="e.g., Home QTH">
+            </mat-form-field>
+          </div>
+
           <div class="form-row">
             <mat-form-field appearance="outline" class="flex-2">
               <mat-label>Address</mat-label>
-              <input matInput [(ngModel)]="locationAddress"
+              <input matInput [(ngModel)]="locationForm.address"
                      placeholder="123 Main St, City, State ZIP">
             </mat-form-field>
           </div>
@@ -85,13 +129,13 @@ ModuleRegistry.registerModules([AllCommunityModule]);
           <div class="form-row">
             <mat-form-field appearance="outline" class="flex-1">
               <mat-label>Latitude</mat-label>
-              <input matInput type="number" [(ngModel)]="locationLat" step="0.000001">
+              <input matInput type="number" [(ngModel)]="locationForm.latitude" step="0.000001">
             </mat-form-field>
             <mat-form-field appearance="outline" class="flex-1">
               <mat-label>Longitude</mat-label>
-              <input matInput type="number" [(ngModel)]="locationLng" step="0.000001">
+              <input matInput type="number" [(ngModel)]="locationForm.longitude" step="0.000001">
             </mat-form-field>
-            <button mat-raised-button (click)="useCurrentLocation()"
+            <button mat-raised-button (click)="useCurrentGeoLocation()"
                     [disabled]="isGettingLocation()">
               <mat-icon>my_location</mat-icon>
               {{ isGettingLocation() ? 'Getting...' : 'Use Current' }}
@@ -99,9 +143,21 @@ ModuleRegistry.registerModules([AllCommunityModule]);
           </div>
 
           <div class="form-actions">
-            <button mat-raised-button color="primary" (click)="saveLocation()">
-              <mat-icon>save</mat-icon> Save Location
-            </button>
+            @if (editingLocation) {
+              <button mat-raised-button color="primary" (click)="updateLocationEntry()"
+                      [disabled]="!canSaveLocation()">
+                <mat-icon>save</mat-icon> Update
+              </button>
+              <button mat-stroked-button (click)="cancelLocationEdit()">Cancel</button>
+              <button mat-stroked-button color="warn" (click)="deleteLocationEntry()">
+                <mat-icon>delete</mat-icon> Delete
+              </button>
+            } @else {
+              <button mat-raised-button color="primary" (click)="addLocationEntry()"
+                      [disabled]="!canSaveLocation()">
+                <mat-icon>add</mat-icon> Add Location
+              </button>
+            }
           </div>
         </mat-card-content>
       </mat-card>
@@ -187,7 +243,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
                   <mat-option [value]="null">-- None Selected --</mat-option>
                   @for (radio of userProfileService.radioSetups(); track radio.id) {
                     <mat-option [value]="radio.id">
-                      {{ radio.make }} {{ radio.model }} - {{ radio.antenna }}
+                      {{ radio.nickname }}
                     </mat-option>
                   }
                 </mat-select>
@@ -214,6 +270,13 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
           <!-- Add/Edit Radio Form -->
           <h4>{{ editingRadio ? 'Edit' : 'Add' }} Radio Setup</h4>
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="flex-2">
+              <mat-label>Nickname</mat-label>
+              <input matInput [(ngModel)]="radioForm.nickname" placeholder="e.g., Shack HF Rig">
+            </mat-form-field>
+          </div>
+
           <div class="form-row">
             <mat-form-field appearance="outline" class="flex-1">
               <mat-label>Make</mat-label>
@@ -326,10 +389,24 @@ export class ConfigureComponent implements OnInit {
   newCallSign = '';
 
   // Location
-  locationAddress = '';
-  locationLat: number | null = null;
-  locationLng: number | null = null;
+  selectedLocationId: string | null = null;
+  savedLocations = computed(() => this.userProfileService.savedLocations());
+  editingLocation: SavedLocation | null = null;
+  locationForm = {
+    nickname: '',
+    address: '',
+    latitude: null as number | null,
+    longitude: null as number | null
+  };
   isGettingLocation = signal(false);
+  private locationGridApi?: GridApi;
+
+  locationColumnDefs: ColDef[] = [
+    { field: 'nickname', headerName: 'Nickname', sortable: true, filter: true },
+    { field: 'address', headerName: 'Address', sortable: true, filter: true, flex: 2 },
+    { field: 'latitude', headerName: 'Lat', sortable: true, filter: true, width: 100 },
+    { field: 'longitude', headerName: 'Long', sortable: true, filter: true, width: 100 }
+  ];
 
   // Repeater/Simplex
   useRepeater = false;
@@ -345,6 +422,7 @@ export class ConfigureComponent implements OnInit {
   radioSetups = computed(() => this.userProfileService.radioSetups());
   editingRadio: RadioSetup | null = null;
   radioForm = {
+    nickname: '',
     make: '',
     model: '',
     antenna: '',
@@ -352,6 +430,7 @@ export class ConfigureComponent implements OnInit {
   };
 
   radioColumnDefs: ColDef[] = [
+    { field: 'nickname', headerName: 'Nickname', sortable: true, filter: true },
     { field: 'make', headerName: 'Make', sortable: true, filter: true },
     { field: 'model', headerName: 'Model', sortable: true, filter: true },
     { field: 'antenna', headerName: 'Antenna', sortable: true, filter: true },
@@ -373,9 +452,7 @@ export class ConfigureComponent implements OnInit {
     const profile = this.userProfileService.profile();
     if (profile) {
       this.newCallSign = profile.callSign || '';
-      this.locationAddress = profile.location?.address || '';
-      this.locationLat = profile.location?.latitude || null;
-      this.locationLng = profile.location?.longitude || null;
+      this.selectedLocationId = profile.currentLocationId || null;
       this.useRepeater = profile.useRepeater || false;
       this.simplexFrequency = profile.simplexFrequency || '146.52';
       this.repeaterCallSign = profile.repeaterInfo?.callSign || '';
@@ -415,7 +492,25 @@ export class ConfigureComponent implements OnInit {
   }
 
   // Location
-  useCurrentLocation(): void {
+  onLocationGridReady(params: GridReadyEvent): void {
+    this.locationGridApi = params.api;
+  }
+
+  onLocationRowClicked(event: any): void {
+    this.editingLocation = event.data;
+    this.locationForm = {
+      nickname: event.data.nickname || '',
+      address: event.data.address || '',
+      latitude: event.data.latitude || null,
+      longitude: event.data.longitude || null
+    };
+  }
+
+  canSaveLocation(): boolean {
+    return !!(this.locationForm.nickname.trim());
+  }
+
+  useCurrentGeoLocation(): void {
     if (!navigator.geolocation) {
       this.snackBar.open('Geolocation not supported', 'Dismiss', { duration: 3000 });
       return;
@@ -424,10 +519,10 @@ export class ConfigureComponent implements OnInit {
     this.isGettingLocation.set(true);
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        this.locationLat = position.coords.latitude;
-        this.locationLng = position.coords.longitude;
+        this.locationForm.latitude = position.coords.latitude;
+        this.locationForm.longitude = position.coords.longitude;
         this.isGettingLocation.set(false);
-        this.snackBar.open('Location updated', 'Dismiss', { duration: 2000 });
+        this.snackBar.open('Coordinates updated', 'Dismiss', { duration: 2000 });
       },
       (error) => {
         this.isGettingLocation.set(false);
@@ -436,17 +531,69 @@ export class ConfigureComponent implements OnInit {
     );
   }
 
-  async saveLocation(): Promise<void> {
-    const location: Location = {};
-    if (this.locationAddress) location.address = this.locationAddress;
-    if (this.locationLat !== null) location.latitude = this.locationLat;
-    if (this.locationLng !== null) location.longitude = this.locationLng;
+  async addLocationEntry(): Promise<void> {
+    if (!this.canSaveLocation()) return;
 
     try {
-      await this.userProfileService.setLocation(location);
-      this.snackBar.open('Location saved', 'Dismiss', { duration: 3000 });
+      await this.userProfileService.addLocation({
+        nickname: this.locationForm.nickname.trim(),
+        address: this.locationForm.address?.trim(),
+        latitude: this.locationForm.latitude || undefined,
+        longitude: this.locationForm.longitude || undefined
+      });
+      this.clearLocationForm();
+      this.snackBar.open('Location added', 'Dismiss', { duration: 3000 });
     } catch (error) {
-      this.snackBar.open('Error saving location', 'Dismiss', { duration: 3000 });
+      this.snackBar.open('Error adding location', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async updateLocationEntry(): Promise<void> {
+    if (!this.editingLocation || !this.canSaveLocation()) return;
+
+    try {
+      await this.userProfileService.updateLocation({
+        ...this.editingLocation,
+        nickname: this.locationForm.nickname.trim(),
+        address: this.locationForm.address?.trim(),
+        latitude: this.locationForm.latitude || undefined,
+        longitude: this.locationForm.longitude || undefined
+      });
+      this.clearLocationForm();
+      this.snackBar.open('Location updated', 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snackBar.open('Error updating location', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  async deleteLocationEntry(): Promise<void> {
+    if (!this.editingLocation) return;
+
+    try {
+      await this.userProfileService.deleteLocation(this.editingLocation.id);
+      this.clearLocationForm();
+      this.snackBar.open('Location deleted', 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snackBar.open('Error deleting location', 'Dismiss', { duration: 3000 });
+    }
+  }
+
+  cancelLocationEdit(): void {
+    this.clearLocationForm();
+  }
+
+  private clearLocationForm(): void {
+    this.editingLocation = null;
+    this.locationForm = { nickname: '', address: '', latitude: null, longitude: null };
+    this.locationGridApi?.deselectAll();
+  }
+
+  async setCurrentLocation(locationId: string | null): Promise<void> {
+    try {
+      await this.userProfileService.setCurrentLocation(locationId);
+      this.snackBar.open('Active location updated', 'Dismiss', { duration: 2000 });
+    } catch (error) {
+      this.snackBar.open('Error setting active location', 'Dismiss', { duration: 3000 });
     }
   }
 
@@ -505,6 +652,7 @@ export class ConfigureComponent implements OnInit {
   onRadioRowClicked(event: any): void {
     this.editingRadio = event.data;
     this.radioForm = {
+      nickname: event.data.nickname || '',
       make: event.data.make,
       model: event.data.model,
       antenna: event.data.antenna,
@@ -513,7 +661,7 @@ export class ConfigureComponent implements OnInit {
   }
 
   canSaveRadio(): boolean {
-    return !!(this.radioForm.make.trim() && this.radioForm.model.trim());
+    return !!(this.radioForm.nickname.trim() && this.radioForm.make.trim() && this.radioForm.model.trim());
   }
 
   async addRadio(): Promise<void> {
@@ -521,6 +669,7 @@ export class ConfigureComponent implements OnInit {
 
     try {
       await this.userProfileService.addRadioSetup({
+        nickname: this.radioForm.nickname.trim(),
         make: this.radioForm.make.trim(),
         model: this.radioForm.model.trim(),
         antenna: this.radioForm.antenna.trim(),
@@ -539,6 +688,7 @@ export class ConfigureComponent implements OnInit {
     try {
       await this.userProfileService.updateRadioSetup({
         ...this.editingRadio,
+        nickname: this.radioForm.nickname.trim(),
         make: this.radioForm.make.trim(),
         model: this.radioForm.model.trim(),
         antenna: this.radioForm.antenna.trim(),
@@ -569,7 +719,7 @@ export class ConfigureComponent implements OnInit {
 
   private clearRadioForm(): void {
     this.editingRadio = null;
-    this.radioForm = { make: '', model: '', antenna: '', description: '' };
+    this.radioForm = { nickname: '', make: '', model: '', antenna: '', description: '' };
     this.gridApi?.deselectAll();
   }
 
