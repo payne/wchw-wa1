@@ -69,3 +69,22 @@
     - Added Locations section with AG Grid (sortable/filterable), dropdown for current location
     - Location form with nickname, address, lat/long, and "Use Current" geolocation button
   - Deployed to Firebase
+
+### Feature: Interactive Signal Map
+- **Request**: Add Leaflet/OpenStreetMap map to visualize stations and signal paths with layer controls
+- **Actions Taken**:
+  - Installed Leaflet and @types/leaflet
+  - Added Leaflet CSS to styles.scss
+  - Created standalone SignalMapComponent with:
+    - OpenStreetMap tile layer
+    - Station markers showing receiver locations with call sign tooltips and popups
+    - Signal path polylines connecting stations that have communicated
+    - Green lines for simplex contacts, orange lines for repeater contacts
+    - Line thickness increases with more reports between stations
+    - Popup info showing call signs, signal strength, report count, and frequency mode
+    - Layer control to toggle: Stations, Simplex Paths, Repeater Paths
+    - Auto-fit bounds to show all stations
+    - Legend showing marker and line meanings
+  - Added map to Home component between form and grid
+  - Component is standalone for easy reuse/relocation
+  - Deployed to Firebase

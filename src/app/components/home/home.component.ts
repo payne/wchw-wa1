@@ -18,6 +18,7 @@ import { AuthService } from '../../services/auth.service';
 import { FirestoreService } from '../../services/firestore.service';
 import { UserProfileService } from '../../services/user-profile.service';
 import { SignalReport } from '../../models/signal-report.model';
+import { SignalMapComponent } from '../signal-map/signal-map.component';
 
 @Component({
   selector: 'app-home',
@@ -31,7 +32,8 @@ import { SignalReport } from '../../models/signal-report.model';
     MatButtonModule,
     MatIconModule,
     MatSnackBarModule,
-    AgGridAngular
+    AgGridAngular,
+    SignalMapComponent
   ],
   template: `
     <div class="home-container">
@@ -64,6 +66,15 @@ import { SignalReport } from '../../models/signal-report.model';
               <input matInput type="datetime-local" [(ngModel)]="time" name="time" required>
             </mat-form-field>
           </form>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card class="map-card">
+        <mat-card-header>
+          <mat-card-title>Signal Map</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <app-signal-map [reports]="rowData"></app-signal-map>
         </mat-card-content>
       </mat-card>
 
@@ -106,6 +117,12 @@ import { SignalReport } from '../../models/signal-report.model';
     }
     .report-form button {
       margin-top: 8px;
+    }
+    .map-card {
+      margin-bottom: 16px;
+    }
+    .map-card mat-card-content {
+      height: 450px;
     }
     .grid-card {
       height: 500px;
