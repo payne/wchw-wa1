@@ -152,7 +152,29 @@ export class HomeComponent implements OnInit, OnDestroy {
       filter: true,
       valueFormatter: (params) => this.formatTimestamp(params.value)
     },
-    { field: 'receiverCall', headerName: "Receiver's Call", sortable: true, filter: true }
+    { field: 'receiverCall', headerName: "Receiver's Call", sortable: true, filter: true },
+    {
+      headerName: 'Frequency',
+      sortable: true,
+      filter: true,
+      valueGetter: (params) => {
+        if (params.data?.useRepeater) {
+          return `${params.data.repeaterCallSign || ''} ${params.data.repeaterFrequency || ''}`.trim();
+        }
+        return params.data?.simplexFrequency || '';
+      }
+    },
+    {
+      headerName: 'Radio',
+      sortable: true,
+      filter: true,
+      valueGetter: (params) => {
+        if (params.data?.radioMake || params.data?.radioModel) {
+          return `${params.data.radioMake || ''} ${params.data.radioModel || ''}`.trim();
+        }
+        return '';
+      }
+    }
   ];
 
   defaultColDef: ColDef = {
@@ -214,13 +236,36 @@ export class HomeComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
 
     try {
-      await this.firestoreService.addSignalReport({
+      // Get current radio setup
+      const currentRadio = this.userProfileService.currentRadio();
+      const location = this.userProfileService.location();
+      const useRepeater = this.userProfileService.useRepeater();
+      const repeaterInfo = this.userProfileService.repeaterInfo();
+      const simplexFrequency = this.userProfileService.simplexFrequency();
+
+      // Build report object, filtering out undefined values (Firestore doesn't accept undefined)
+      const report: any = {
         transmitterCall: this.transmitterCall.trim().toUpperCase(),
         signalHeard: this.signalHeard.trim(),
         time: Timestamp.fromDate(new Date(this.time)),
         receiverCall: callSign,
-        receiverUid: user.uid
-      });
+        receiverUid: user.uid,
+        useRepeater
+      };
+
+      // Add optional fields only if they have values
+      if (currentRadio?.make) report.radioMake = currentRadio.make;
+      if (currentRadio?.model) report.radioModel = currentRadio.model;
+      if (currentRadio?.antenna) report.antenna = currentRadio.antenna;
+      if (currentRadio?.description) report.radioDescription = currentRadio.description;
+      if (location && (location.address || location.latitude || location.longitude)) {
+        report.location = location;
+      }
+      if (useRepeater && repeaterInfo?.callSign) report.repeaterCallSign = repeaterInfo.callSign;
+      if (useRepeater && repeaterInfo?.frequency) report.repeaterFrequency = repeaterInfo.frequency;
+      if (!useRepeater && simplexFrequency) report.simplexFrequency = simplexFrequency;
+
+      await this.firestoreService.addSignalReport(report);
 
       this.snackBar.open('Report submitted successfully', 'Dismiss', { duration: 3000 });
       this.transmitterCall = '';
