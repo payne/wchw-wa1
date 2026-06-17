@@ -69,31 +69,50 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
         </mat-card-content>
       </mat-card>
 
-      <mat-card class="map-card">
-        <mat-card-header>
-          <mat-card-title>Signal Map</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          <app-signal-map [reports]="rowData"></app-signal-map>
-        </mat-card-content>
-      </mat-card>
+      <div class="swap-button-container">
+        <button mat-stroked-button (click)="toggleMapPosition()">
+          <mat-icon>swap_vert</mat-icon>
+          {{ mapFirst() ? 'Show Table First' : 'Show Map First' }}
+        </button>
+      </div>
 
-      <mat-card class="grid-card">
-        <mat-card-header>
-          <mat-card-title>Signal Reports</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          <ag-grid-angular
-            class="ag-theme-quartz"
-            [rowData]="rowData"
-            [columnDefs]="columnDefs"
-            [defaultColDef]="defaultColDef"
-            [pagination]="true"
-            [paginationPageSize]="20"
-            (gridReady)="onGridReady($event)">
-          </ag-grid-angular>
-        </mat-card-content>
-      </mat-card>
+      @if (mapFirst()) {
+        <ng-container *ngTemplateOutlet="mapCard"></ng-container>
+        <ng-container *ngTemplateOutlet="tableCard"></ng-container>
+      } @else {
+        <ng-container *ngTemplateOutlet="tableCard"></ng-container>
+        <ng-container *ngTemplateOutlet="mapCard"></ng-container>
+      }
+
+      <ng-template #mapCard>
+        <mat-card class="map-card">
+          <mat-card-header>
+            <mat-card-title>Signal Map</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <app-signal-map [reports]="rowData"></app-signal-map>
+          </mat-card-content>
+        </mat-card>
+      </ng-template>
+
+      <ng-template #tableCard>
+        <mat-card class="grid-card">
+          <mat-card-header>
+            <mat-card-title>Signal Reports</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <ag-grid-angular
+              class="ag-theme-quartz"
+              [rowData]="rowData"
+              [columnDefs]="columnDefs"
+              [defaultColDef]="defaultColDef"
+              [pagination]="true"
+              [paginationPageSize]="20"
+              (gridReady)="onGridReady($event)">
+            </ag-grid-angular>
+          </mat-card-content>
+        </mat-card>
+      </ng-template>
     </div>
   `,
   styles: [`
@@ -104,6 +123,11 @@ import { SignalMapComponent } from '../signal-map/signal-map.component';
     }
     .form-card {
       margin-bottom: 16px;
+    }
+    .swap-button-container {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 8px;
     }
     .report-form {
       display: flex;
@@ -158,6 +182,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   rowData: SignalReport[] = [];
   isSubmitting = signal(false);
+  mapFirst = signal(true);
 
   columnDefs: ColDef[] = [
     { field: 'transmitterCall', headerName: "Transmitter's Call", sortable: true, filter: true },
@@ -228,6 +253,10 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   onGridReady(params: GridReadyEvent): void {
     this.gridApi = params.api;
+  }
+
+  toggleMapPosition(): void {
+    this.mapFirst.update(v => !v);
   }
 
   canSubmit(): boolean {
