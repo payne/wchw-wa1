@@ -59,3 +59,11 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# CLI compiled binaries
+/cli/lsr
+/cli/lsr.exe
+/cli/lsr-linux
+/cli/lsr-mac-intel
+/cli/lsr-mac-arm
+/cli/deno.lock

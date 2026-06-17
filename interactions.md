@@ -151,3 +151,62 @@
   - Export Single Group: Select a group and download its reports as CSV or JSON
   - Export includes: transmitterCall, signalHeard, time, receiverCall, groupNumber, frequency, frequencyType, radioMake, radioModel, antenna, locationAddress, locationLat, locationLong
   - Deployed to Firebase
+
+### Bug Fix: Distance Calculation
+- **Issue**: Distance not showing in table
+- **Fixes**:
+  - Added colId to Distance column for proper grid refresh
+  - Fixed valueGetter this binding with separate getDistance method
+  - Updated to look up BOTH transmitter and receiver QTH from HamDB (not just transmitter)
+  - Distance now calculated from FCC-registered addresses of both stations
+  - Deployed to Firebase
+
+### Documentation: Test Steps
+- **Request**: Create test-steps.md with comprehensive test procedures
+- **Actions Taken**:
+  - Created test-steps.md with 12 test sections covering all features
+  - Test callsigns: N3PAY (receiver), KX0U, KF0VWD, KF0SLC, KF0UWE, KD0NMD (transmitters)
+  - Includes test results checklist
+  - Committed and pushed to repository
+
+### Playwright End-to-End Tests
+- **Request**: Create Playwright tests for all test scenarios
+- **Actions Taken**:
+  - Installed Playwright with Chromium, Firefox, and WebKit browsers
+  - Created e2e/ directory with test files:
+    - `fixtures.ts` - Shared test data and helper functions
+    - `auth.spec.ts` - Authentication flow tests
+    - `home.spec.ts` - Home page, form, and table tests
+    - `configure.spec.ts` - Configure page section tests
+    - `map.spec.ts` - Leaflet map functionality tests
+    - `navigation.spec.ts` - Page navigation tests
+    - `signal-reports.spec.ts` - AG Grid table and expandable rows tests
+    - `pwa.spec.ts` - PWA features, offline support, responsive design tests
+  - Added npm scripts: e2e, e2e:ui, e2e:headed, e2e:debug, e2e:report
+  - Tests run against deployed app at https://wchw1-f9f49.web.app
+  - Committed and pushed to repository
+
+## 2026-06-17
+
+### Feature: Command-Line Interface (CLI)
+- **Request**: Create a Deno CLI tool for logging signal reports from terminal
+- **Actions Taken**:
+  - Created cli/ directory with full Deno TypeScript implementation:
+    - `deps.ts` - Standard library imports (flags, fs, path, http/server)
+    - `config.ts` - Configuration storage in ~/.wchw/ with OAuth credential management
+    - `auth.ts` - Google OAuth 2.0 flow with browser login and localhost callback
+    - `firestore.ts` - Firestore REST API integration for adding signal reports
+    - `main.ts` - CLI entry point with command handling
+    - `deno.json` - Build tasks for compilation
+    - `README.md` - Comprehensive documentation
+  - CLI Commands:
+    - `lsr login` - Google OAuth authentication via browser
+    - `lsr logout` - Sign out
+    - `lsr status` - Show current login and settings
+    - `lsr setup` - Configure OAuth credentials (client ID, secret, Firebase API key)
+    - `lsr config` - Show/set configuration (call sign, group, simplex/repeater mode)
+    - `lsr groups` - List available groups
+    - `lsr <callsign> <signal>` - Log a signal report
+  - Cross-platform compilation targets: Linux, Windows, macOS Intel, macOS ARM
+  - Standalone executable (~82MB) requires no runtime dependencies
+  - Added compiled binaries to .gitignore

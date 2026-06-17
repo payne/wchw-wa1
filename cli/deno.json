@@ -1,0 +1,18 @@
+{
+  "name": "@wchw/lsr",
+  "version": "1.0.0",
+  "exports": "./main.ts",
+  "tasks": {
+    "run": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "compile": "deno compile --allow-net --allow-read --allow-write --allow-env --allow-run --output lsr main.ts",
+    "compile:linux": "deno compile --target x86_64-unknown-linux-gnu --allow-net --allow-read --allow-write --allow-env --allow-run --output lsr-linux main.ts",
+    "compile:windows": "deno compile --target x86_64-pc-windows-msvc --allow-net --allow-read --allow-write --allow-env --allow-run --output lsr.exe main.ts",
+    "compile:mac-intel": "deno compile --target x86_64-apple-darwin --allow-net --allow-read --allow-write --allow-env --allow-run --output lsr-mac-intel main.ts",
+    "compile:mac-arm": "deno compile --target aarch64-apple-darwin --allow-net --allow-read --allow-write --allow-env --allow-run --output lsr-mac-arm main.ts",
+    "compile:all": "deno task compile && deno task compile:linux && deno task compile:windows && deno task compile:mac-intel"
+  },
+  "imports": {},
+  "compilerOptions": {
+    "strict": true
+  }
+}
