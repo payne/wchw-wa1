@@ -30,6 +30,9 @@ This is documented by Google/Firebase as the standard security model for web app
 - `src/environments/environment.ts` - Contains Firebase config (API key, project ID, etc.)
 - `cli/config.ts` - Contains placeholder values only, real credentials stored locally
 - `cli/auth.ts` - Handles OAuth flow, no hardcoded secrets
+- `scripts/firestore-backup.sh` - Reads tokens at runtime from Firebase CLI
+- `scripts/firestore-create-admin-config.sh` - Reads tokens at runtime from Firebase CLI
+- `scripts/firestore-delete-all.sh` - Uses Firebase CLI, no credentials needed
 - `.gitignore` - Properly excludes sensitive files
 
 ## Firestore Security Rules
@@ -62,6 +65,22 @@ The `lsr` CLI tool stores credentials securely:
 - Refresh tokens stored in `~/.wchw/config.json`
 - No credentials are hardcoded in the source code
 - Users must run `lsr setup` to configure their own OAuth credentials
+
+## Scripts Security Review (2026-06-17)
+
+All shell scripts in `scripts/` have been reviewed for secrets:
+
+| Script | Status | Notes |
+|--------|--------|-------|
+| `firestore-backup.sh` | ✅ Safe | Reads access tokens from Firebase CLI at runtime |
+| `firestore-create-admin-config.sh` | ✅ Safe | Reads access tokens from Firebase CLI at runtime |
+| `firestore-delete-all.sh` | ✅ Safe | Uses Firebase CLI commands, no credentials |
+
+**Key points:**
+- No hardcoded secrets, API keys, or tokens in any scripts
+- All authentication tokens are obtained at runtime from `~/.config/configstore/firebase-tools.json`
+- Scripts require user to be logged in via `firebase login`
+- Redundant `.js` and `.mjs` script versions were removed to avoid duplication
 
 ## Conclusion
 
