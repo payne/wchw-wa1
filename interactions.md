@@ -257,3 +257,9 @@
     - Added rules for `/config/admin`, `/invitations`, `/openGroups`, `/openGroupNotifications`
     - Helper functions: isAdmin(), isInvited(), canInvite()
 - **Admin Emails**: matt.n3pay@gmail.com, jim.kx0u@gmail.com (configured in `/config/admin`)
+
+## 2026-06-24
+
+### About Page GitHub Link
+- **Request**: Add the URL https://github.com/payne/wchw-wa1 to the about page
+- **Action**: Added a "View source on GitHub" link to `about.component.ts`, pointing to the repo URL

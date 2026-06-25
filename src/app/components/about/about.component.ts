@@ -51,6 +51,12 @@ import { AuthService } from '../../services/auth.service';
               </button>
             </div>
           }
+
+          <p class="source-link">
+            <a href="https://github.com/payne/wchw-wa1" target="_blank" rel="noopener noreferrer">
+              View source on GitHub
+            </a>
+          </p>
         </mat-card-content>
       </mat-card>
     </div>
@@ -76,6 +82,10 @@ import { AuthService } from '../../services/auth.service';
     }
     .sign-in-section {
       margin-top: 24px;
+      text-align: center;
+    }
+    .source-link {
+      margin-top: 16px;
       text-align: center;
     }
   `]
