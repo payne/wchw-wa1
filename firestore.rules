@@ -1,71 +1,18 @@
-rules_version = '2';
+rules_version='2'
 
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper function to check if user is admin
-    function isAdmin() {
-      return request.auth != null &&
-        exists(/databases/$(database)/documents/config/admin) &&
-        request.auth.token.email in get(/databases/$(database)/documents/config/admin).data.adminEmails;
-    }
-
-    // Helper function to check if user is invited
-    function isInvited() {
-      return request.auth != null &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.invitedByUid != null;
-    }
-
-    // Helper function to check if user can invite others
-    function canInvite() {
-      return isAdmin() || isInvited();
-    }
-
-    // Admin config - read by all auth users, write by admins only
-    match /config/admin {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // User profiles - users can only read/write their own profile
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // Invitations - create by invited users/admins
-    // Read is public (token acts as secret authorization)
-    // Update requires authentication
-    match /invitations/{invitationId} {
-      allow read: if true;
-      allow create: if request.auth != null && canInvite();
-      allow update: if request.auth != null;
-    }
-
-    // Open groups - read by all auth users, write by invited users/admins
-    match /openGroups/{groupId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && canInvite();
-    }
-
-    // Open group notifications - create own, read own or admin
-    match /openGroupNotifications/{notificationId} {
-      allow create: if request.auth != null;
-      allow read: if request.auth != null && (
-        resource.data.uid == request.auth.uid || isAdmin()
-      );
-    }
-
-    // Signal reports - any authenticated user can read, only create (no edit/delete)
-    match /signalReports/{reportId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-    }
-
-    // Repeaters - shared list, any authenticated user can read or add
-    match /repeaters/{repeaterId} {
-      allow read: if request.auth != null;
-      allow create, update: if request.auth != null;
+    match /{document=**} {
+      // This rule allows anyone with your database reference to view, edit,
+      // and delete all data in your database. It is useful for getting
+      // started, but it is configured to expire after 30 days because it
+      // leaves your app open to attackers. At that time, all client
+      // requests to your database will be denied.
+      //
+      // Make sure to write security rules for your app before that time, or
+      // else all client requests to your database will be denied until you
+      // update your rules.
+      allow read, write: if request.time < timestamp.date(2026, 7, 28);
     }
   }
 }

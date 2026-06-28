@@ -263,3 +263,11 @@
 ### About Page GitHub Link
 - **Request**: Add the URL https://github.com/payne/wchw-wa1 to the about page
 - **Action**: Added a "View source on GitHub" link to `about.component.ts`, pointing to the repo URL
+
+## 2026-06-28
+
+### Bug Fix: Firebase API Key Mismatch
+- **Issue**: Google sign-in failing with "auth/api-key-not-valid" error on deployed site
+- **Root Cause**: `environment.ts` had Firebase config for project `wchw1-f9f49`, but app was deployed to `n3pay-2b69c`
+- **Fix**: Updated `environment.ts` with correct Firebase SDK config for `n3pay-2b69c` project
+- **Action Required**: User needs to run `npm run build && firebase deploy` to apply fix
