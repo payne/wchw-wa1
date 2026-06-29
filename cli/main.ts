@@ -3,7 +3,7 @@ import { loadConfig, saveConfig, Config } from "./config.ts";
 import { login, logout, ensureAuthenticated } from "./auth.ts";
 import { addSignalReport, listGroups } from "./firestore.ts";
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 
 function printHelp(): void {
   console.log(`
@@ -11,6 +11,7 @@ lsr - Log Signal Report CLI v${VERSION}
 
 USAGE:
   lsr <transmitter_call> <signal>   Log a signal report
+  lsr log                            Interactive logging mode (fast entry)
   lsr login                          Sign in via web browser
   lsr logout                         Sign out
   lsr status                         Show current status
@@ -21,11 +22,19 @@ USAGE:
 EXAMPLES:
   lsr KX0U 59                        Log hearing KX0U with signal 59
   lsr KF0VWD 57 --time "2024-06-15T14:30:00Z"
+  lsr log                            Start interactive logging mode
   lsr login                          Authenticate via web browser
   lsr config --group 1               Set current group to #1
   lsr config --simplex 146.52        Set simplex frequency
   lsr config --repeater W0JJK 145.235
   lsr status                         Show logged in user and settings
+
+INTERACTIVE LOGGING MODE:
+  lsr log
+  > kf0uwe 412
+  > kf0vwz 324
+  > k0ux 599
+  > end
 
 OPTIONS:
   --time, -t <ISO8601>    Override timestamp (default: now)
@@ -196,6 +205,115 @@ async function handleLogReport(transmitterCall: string, signalHeard: string, tim
   }
 }
 
+async function handleInteractiveLogging(): Promise<void> {
+  const config = await ensureAuthenticated();
+  if (!config) return;
+
+  if (!config.callSign) {
+    console.error("Call sign not configured.");
+    console.error("Set your call sign with: lsr config --callsign <CALL>");
+    return;
+  }
+
+  console.log("");
+  console.log("Interactive Logging Mode");
+  console.log("========================");
+  console.log(`Receiver: ${config.callSign}`);
+  if (config.currentGroupNumber) {
+    console.log(`Group: #${config.currentGroupNumber}`);
+  }
+  console.log("");
+  console.log("Enter: <callsign> <signal>  (e.g., KX0U 59)");
+  console.log("Commands: quiet, no quiet, end");
+  console.log("");
+
+  let loggedCount = 0;
+  let quietMode = false;
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+
+  // Read from stdin line by line
+  const buf = new Uint8Array(1024);
+  let lineBuffer = "";
+
+  while (true) {
+    // Print prompt
+    await Deno.stdout.write(encoder.encode("> "));
+
+    // Read input
+    const n = await Deno.stdin.read(buf);
+    if (n === null) {
+      // EOF (Ctrl+D)
+      console.log("");
+      break;
+    }
+
+    lineBuffer += decoder.decode(buf.subarray(0, n));
+
+    // Process complete lines
+    while (lineBuffer.includes("\n")) {
+      const newlineIndex = lineBuffer.indexOf("\n");
+      const line = lineBuffer.slice(0, newlineIndex).trim();
+      lineBuffer = lineBuffer.slice(newlineIndex + 1);
+
+      // Check for exit commands
+      const lowerLine = line.toLowerCase();
+      if (lowerLine === "end" || lowerLine === "quit" || lowerLine === "exit" || lowerLine === "q") {
+        console.log("");
+        console.log(`Session complete. Logged ${loggedCount} report${loggedCount !== 1 ? "s" : ""}.`);
+        return;
+      }
+
+      // Check for quiet mode toggle
+      if (lowerLine === "quiet") {
+        quietMode = true;
+        console.log("  Quiet mode ON");
+        continue;
+      }
+      if (lowerLine === "no quiet" || lowerLine === "noquiet" || lowerLine === "verbose") {
+        quietMode = false;
+        console.log("  Quiet mode OFF");
+        continue;
+      }
+
+      // Skip empty lines
+      if (!line) {
+        continue;
+      }
+
+      // Parse input: <callsign> <signal>
+      const parts = line.split(/\s+/);
+      if (parts.length < 2) {
+        console.log("  Invalid format. Use: <callsign> <signal>");
+        continue;
+      }
+
+      const transmitterCall = parts[0].toUpperCase();
+      const signalHeard = parts[1];
+
+      // Quick validation
+      if (!/^[A-Z0-9]{3,10}$/.test(transmitterCall)) {
+        console.log(`  Invalid callsign: ${transmitterCall}`);
+        continue;
+      }
+
+      // Submit the report
+      const success = await addSignalReport(config, transmitterCall, signalHeard, new Date());
+
+      if (success) {
+        loggedCount++;
+        if (!quietMode) {
+          console.log(`  OK: ${transmitterCall} ${signalHeard}`);
+        }
+      } else {
+        console.log(`  FAILED: ${transmitterCall} ${signalHeard}`);
+      }
+    }
+  }
+
+  console.log(`Session complete. Logged ${loggedCount} report${loggedCount !== 1 ? "s" : ""}.`);
+}
+
 async function main(): Promise<void> {
   const args = parse(Deno.args, {
     boolean: ["help", "h", "version", "v"],
@@ -244,6 +362,11 @@ async function main(): Promise<void> {
 
     case "groups":
       await handleGroups();
+      break;
+
+    case "log":
+    case "logging":
+      await handleInteractiveLogging();
       break;
 
     case "help":

@@ -85,6 +85,41 @@ lsr KF0SLC 55
 lsr KF0UWE 59 --time "2024-06-15T14:30:00Z"
 ```
 
+### Interactive Logging Mode (Fast Entry)
+
+For rapid logging of multiple contacts, use interactive mode:
+
+```bash
+lsr log
+```
+
+This starts a session where you can quickly enter reports:
+
+```
+Interactive Logging Mode
+========================
+Receiver: N3PAY
+Group: #1
+
+Enter: <callsign> <signal>  (e.g., KX0U 59)
+Type 'end' or press Ctrl+D to finish
+
+> kf0uwe 412
+  OK: KF0UWE 412
+> kf0vwz 324
+  OK: KF0VWZ 324
+> k0ux 599
+  OK: K0UX 599
+> end
+
+Session complete. Logged 3 reports.
+```
+
+**Commands in interactive mode:**
+- `quiet` - Suppress OK messages (only show errors)
+- `no quiet` or `verbose` - Show OK messages again
+- `end`, `quit`, `exit`, `q`, or Ctrl+D - Exit session
+
 ### Check Status
 
 ```bash
@@ -108,6 +143,7 @@ lsr help
 | Command | Description |
 |---------|-------------|
 | `lsr <call> <signal>` | Log a signal report |
+| `lsr log` | Interactive logging mode (fast entry) |
 | `lsr login` | Sign in via web browser |
 | `lsr logout` | Sign out |
 | `lsr status` | Show current status and settings |
@@ -136,21 +172,30 @@ Configuration is stored in `~/.wchw/config.json` and includes:
 ## Examples
 
 ```bash
-# Quick logging session
+# Quick logging session (individual commands)
 lsr login
 lsr config --group 1
 lsr KX0U 59
 lsr KF0VWD 57
-lsr KF0SLC 55
-lsr KF0UWE 59
-lsr KD0NMD 53
+
+# Fast logging session (interactive mode)
+lsr login
+lsr config --group 1
+lsr log
+# Then type:
+#   kx0u 59
+#   kf0vwd 57
+#   kf0slc 55
+#   kf0uwe 59
+#   kd0nmd 53
+#   end
 
 # Check your status
 lsr status
 
 # Switch to a different group
 lsr config --group 2
-lsr KX0U 58
+lsr log
 
 # Logout when done
 lsr logout

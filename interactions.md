@@ -322,3 +322,46 @@
   3. Run `./lsr logout` then `./lsr login`
   4. Enter displayed code in web browser
   5. Verify CLI authenticates successfully
+
+### Feature: Interactive Logging Mode
+- **Request**: Add fast entry mode for logging multiple signal reports without typing `lsr` each time
+- **Actions Taken**:
+  - Added `lsr log` command (also accepts `logging`) for interactive mode
+  - Interactive session shows receiver callsign and current group
+  - Simple prompt (`>`) for entering reports as `<callsign> <signal>`
+  - Validates callsign format (3-10 alphanumeric chars)
+  - Shows OK/FAILED status for each report
+  - Tracks and displays count of logged reports
+  - Exit with: `end`, `quit`, `exit`, `q`, or Ctrl+D
+  - Updated version to 2.1.0
+  - Updated README with documentation and examples
+- **Usage**:
+  ```
+  lsr log
+  > kf0uwe 412
+    OK: KF0UWE 412
+  > kf0vwz 324
+    OK: KF0VWZ 324
+  > end
+  Session complete. Logged 2 reports.
+  ```
+
+### Feature: Quiet Mode for Interactive Logging
+- **Request**: Add quiet mode to suppress OK messages during fast logging
+- **Actions Taken**:
+  - Added `quiet` command to enable quiet mode (suppresses OK messages)
+  - Added `no quiet` and `verbose` commands to disable quiet mode
+  - Errors still displayed in quiet mode
+  - Updated help text to show available commands
+  - Updated README with quiet mode documentation
+- **Usage**:
+  ```
+  > quiet
+    Quiet mode ON
+  > kf0uwe 412
+  > kf0vwz 324
+  > no quiet
+    Quiet mode OFF
+  > kd0nmd 55
+    OK: KD0NMD 55
+  ```
