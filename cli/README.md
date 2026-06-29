@@ -41,44 +41,21 @@ deno task compile:mac-intel  # macOS Intel
 deno task compile:mac-arm    # macOS Apple Silicon
 ```
 
-## Setup
+## Quick Start
 
-### 1. Configure OAuth Credentials
-
-You need to create OAuth 2.0 credentials in Google Cloud Console:
-
-1. Go to [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
-2. Select your Firebase project (wchw1-f9f49)
-3. Click "Create Credentials" → "OAuth client ID"
-4. Select "Desktop app" as the application type
-5. Note the Client ID and Client Secret
-
-Also get your Firebase Web API Key from the [Firebase Console](https://console.firebase.google.com/).
-
-Then run:
-
-```bash
-lsr setup
-# Enter your Client ID, Client Secret, and Firebase API Key when prompted
-```
-
-Or set environment variables:
-
-```bash
-export GOOGLE_CLIENT_ID="your-client-id"
-export GOOGLE_CLIENT_SECRET="your-client-secret"
-export FIREBASE_API_KEY="your-firebase-api-key"
-```
-
-### 2. Login
+### 1. Login
 
 ```bash
 lsr login
 ```
 
-This will open your browser for Google sign-in. After authenticating, you'll be logged in and your call sign will be loaded from your profile.
+This will:
+1. Display a device code (e.g., `ABCD-1234`)
+2. Open your browser to the web app's CLI authentication page
+3. Wait for you to enter the code in the web app
+4. Automatically retrieve your credentials once authenticated
 
-### 3. Configure Your Settings
+### 2. Configure Your Settings
 
 ```bash
 # Set your call sign (if not already set in web app)
@@ -131,11 +108,10 @@ lsr help
 | Command | Description |
 |---------|-------------|
 | `lsr <call> <signal>` | Log a signal report |
-| `lsr login` | Sign in with Google |
+| `lsr login` | Sign in via web browser |
 | `lsr logout` | Sign out |
 | `lsr status` | Show current status and settings |
 | `lsr config` | Show/set configuration |
-| `lsr setup` | Configure OAuth credentials |
 | `lsr groups` | List available groups |
 | `lsr help` | Show help |
 
@@ -153,10 +129,9 @@ lsr help
 
 ## Configuration Files
 
-Configuration is stored in `~/.wchw/`:
-
-- `config.json` - User settings and cached tokens
-- `credentials.json` - OAuth credentials (chmod 600)
+Configuration is stored in `~/.wchw/config.json` and includes:
+- Authentication tokens
+- User settings (call sign, group, frequency mode)
 
 ## Examples
 
@@ -183,18 +158,18 @@ lsr logout
 
 ## Troubleshooting
 
-### "OAuth credentials not configured"
-
-Run `lsr setup` and enter your credentials, or set the environment variables.
-
 ### "Not logged in"
 
-Run `lsr login` to authenticate with Google.
+Run `lsr login` to authenticate via your web browser.
+
+### "Authentication timed out"
+
+The authentication code expires after 5 minutes. Run `lsr login` again to get a new code.
 
 ### "Call sign not configured"
 
 Either:
-1. Set it in the web app at https://wchw1-f9f49.web.app/configure
+1. Set it in the web app at https://n3pay-2b69c.web.app/configure
 2. Or run `lsr config --callsign YOUR_CALL`
 
 ### "Token expired"
@@ -207,7 +182,7 @@ Groups must be created in the web app. Run `lsr groups` to see available groups.
 
 ## Security
 
-- Refresh tokens are stored in `~/.wchw/config.json`
-- OAuth credentials are stored in `~/.wchw/credentials.json` with 600 permissions
-- All communication uses HTTPS
+- Authentication tokens are stored in `~/.wchw/config.json`
+- The device code flow ensures credentials never pass through untrusted channels
 - Tokens are automatically refreshed when expired
+- All communication uses HTTPS

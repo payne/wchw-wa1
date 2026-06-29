@@ -1,9 +1,9 @@
 import { parse } from "./deps.ts";
-import { loadConfig, saveConfig, clearConfig, saveCredentials, loadCredentials, Config } from "./config.ts";
+import { loadConfig, saveConfig, Config } from "./config.ts";
 import { login, logout, ensureAuthenticated } from "./auth.ts";
 import { addSignalReport, listGroups } from "./firestore.ts";
 
-const VERSION = "1.0.0";
+const VERSION = "2.0.0";
 
 function printHelp(): void {
   console.log(`
@@ -11,18 +11,17 @@ lsr - Log Signal Report CLI v${VERSION}
 
 USAGE:
   lsr <transmitter_call> <signal>   Log a signal report
-  lsr login                          Sign in with Google
+  lsr login                          Sign in via web browser
   lsr logout                         Sign out
   lsr status                         Show current status
   lsr config                         Show/set configuration
-  lsr setup                          Configure OAuth credentials
   lsr groups                         List available groups
   lsr help                           Show this help
 
 EXAMPLES:
   lsr KX0U 59                        Log hearing KX0U with signal 59
   lsr KF0VWD 57 --time "2024-06-15T14:30:00Z"
-  lsr login                          Authenticate with Google
+  lsr login                          Authenticate via web browser
   lsr config --group 1               Set current group to #1
   lsr config --simplex 146.52        Set simplex frequency
   lsr config --repeater W0JJK 145.235
@@ -45,7 +44,6 @@ function printVersion(): void {
 
 async function printStatus(): Promise<void> {
   const config = await loadConfig();
-  const credentials = await loadCredentials();
 
   console.log("LSR Status");
   console.log("==========");
@@ -67,12 +65,6 @@ async function printStatus(): Promise<void> {
     console.log("Not logged in");
     console.log("");
     console.log("Run: lsr login");
-  }
-
-  console.log("");
-  console.log("OAuth credentials:", credentials ? "Configured" : "Not configured");
-  if (!credentials) {
-    console.log("Run: lsr setup");
   }
 }
 
@@ -149,44 +141,6 @@ async function handleConfig(args: ReturnType<typeof parse>): Promise<void> {
   await saveConfig(config);
 }
 
-async function handleSetup(): Promise<void> {
-  console.log("LSR Setup");
-  console.log("=========");
-  console.log("");
-  console.log("To use this CLI, you need OAuth credentials from Google Cloud Console.");
-  console.log("");
-  console.log("Steps:");
-  console.log("1. Go to: https://console.cloud.google.com/apis/credentials");
-  console.log("2. Create OAuth 2.0 Client ID (Desktop app type)");
-  console.log("3. Note the Client ID and Client Secret");
-  console.log("4. Also get your Firebase Web API Key from Firebase Console");
-  console.log("");
-
-  const clientId = prompt("Enter Google OAuth Client ID:");
-  if (!clientId) {
-    console.error("Client ID is required");
-    return;
-  }
-
-  const clientSecret = prompt("Enter Google OAuth Client Secret:");
-  if (!clientSecret) {
-    console.error("Client Secret is required");
-    return;
-  }
-
-  const apiKey = prompt("Enter Firebase Web API Key:");
-  if (!apiKey) {
-    console.error("API Key is required");
-    return;
-  }
-
-  await saveCredentials(clientId.trim(), clientSecret.trim(), apiKey.trim());
-  console.log("");
-  console.log("Credentials saved to ~/.wchw/credentials.json");
-  console.log("");
-  console.log("Now run: lsr login");
-}
-
 async function handleGroups(): Promise<void> {
   const config = await ensureAuthenticated();
   if (!config) return;
@@ -195,7 +149,7 @@ async function handleGroups(): Promise<void> {
 
   if (groups.length === 0) {
     console.log("No groups configured.");
-    console.log("Create groups in the web app at https://wchw1-f9f49.web.app/configure");
+    console.log("Create groups in the web app at https://n3pay-2b69c.web.app/configure");
     return;
   }
 
@@ -286,10 +240,6 @@ async function main(): Promise<void> {
 
     case "config":
       await handleConfig(args);
-      break;
-
-    case "setup":
-      await handleSetup();
       break;
 
     case "groups":

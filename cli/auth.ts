@@ -1,278 +1,146 @@
-import { serve } from "./deps.ts";
 import {
   Config,
   loadConfig,
   saveConfig,
-  loadCredentials,
   isTokenExpired,
   FIREBASE_CONFIG,
-  OAUTH_CONFIG,
+  WEB_APP_URL,
 } from "./config.ts";
+import { pollForSession, claimAndDeleteSession, getUserProfile } from "./firestore.ts";
 
-const OAUTH_PORT = 8085;
+const FIRESTORE_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
 
-interface TokenResponse {
-  access_token: string;
-  refresh_token?: string;
-  id_token: string;
-  expires_in: number;
-  token_type: string;
+function generateDeviceCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Omit confusing chars: 0, O, I, 1
+  let code = "";
+  const array = new Uint8Array(8);
+  crypto.getRandomValues(array);
+
+  for (let i = 0; i < 8; i++) {
+    code += chars[array[i] % chars.length];
+  }
+
+  // Format as XXXX-XXXX
+  return code.slice(0, 4) + "-" + code.slice(4);
 }
 
-interface FirebaseAuthResponse {
-  idToken: string;
-  refreshToken: string;
-  expiresIn: string;
-  localId: string;
-  email: string;
-  displayName?: string;
+function openBrowser(url: string): void {
+  const cmd = Deno.build.os === "darwin"
+    ? "open"
+    : Deno.build.os === "windows"
+    ? "start"
+    : "xdg-open";
+
+  try {
+    const process = new Deno.Command(cmd, { args: [url] });
+    process.spawn();
+  } catch {
+    // Silently fail if browser can't be opened
+  }
 }
 
 export async function login(): Promise<boolean> {
-  const credentials = await loadCredentials();
-  if (!credentials) {
-    console.error("OAuth credentials not configured.");
-    console.error("");
-    console.error("Please run: lsr setup");
-    console.error("Or set environment variables:");
-    console.error("  GOOGLE_CLIENT_ID");
-    console.error("  GOOGLE_CLIENT_SECRET");
-    console.error("  FIREBASE_API_KEY");
-    return false;
-  }
+  // Generate 8-char code (XXXX-XXXX format)
+  const code = generateDeviceCode();
+  const normalizedCode = code.replace("-", "");
 
-  const { clientId, clientSecret, apiKey } = credentials;
-
-  // Generate OAuth URL
-  const state = crypto.randomUUID();
-  const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-  authUrl.searchParams.set("client_id", clientId);
-  authUrl.searchParams.set("redirect_uri", OAUTH_CONFIG.redirectUri);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("scope", OAUTH_CONFIG.scopes.join(" "));
-  authUrl.searchParams.set("access_type", "offline");
-  authUrl.searchParams.set("prompt", "consent");
-  authUrl.searchParams.set("state", state);
-
-  console.log("Opening browser for Google sign-in...");
+  console.log("");
+  console.log("To authenticate, open your browser to:");
+  console.log(`  ${WEB_APP_URL}/cli-auth`);
+  console.log("");
+  console.log("Enter this code:", code);
+  console.log("");
+  console.log("Waiting for authentication...");
+  console.log("(Press Ctrl+C to cancel)");
   console.log("");
 
-  // Open browser
-  const cmd = Deno.build.os === "darwin" ? "open" : Deno.build.os === "windows" ? "start" : "xdg-open";
-  const process = new Deno.Command(cmd, { args: [authUrl.toString()] });
-  process.spawn();
+  // Open browser automatically
+  openBrowser(`${WEB_APP_URL}/cli-auth`);
 
-  // Start local server to receive callback
-  const authCode = await waitForAuthCallback(state);
+  // Poll Firestore for session (5 minute timeout)
+  const session = await pollForSession(normalizedCode, 300);
 
-  if (!authCode) {
-    console.error("Authentication failed: No auth code received");
-    return false;
-  }
-
-  console.log("Received authorization code, exchanging for tokens...");
-
-  // Exchange code for tokens
-  const tokenResponse = await exchangeCodeForTokens(authCode, clientId, clientSecret);
-  if (!tokenResponse) {
-    console.error("Failed to exchange authorization code for tokens");
-    return false;
-  }
-
-  // Sign in to Firebase with Google credential
-  const firebaseAuth = await signInToFirebase(tokenResponse.id_token, apiKey);
-  if (!firebaseAuth) {
-    console.error("Failed to sign in to Firebase");
+  if (!session) {
+    console.error("Authentication timed out. Please try again.");
     return false;
   }
 
   // Save tokens to config
   const config = await loadConfig();
-  config.accessToken = tokenResponse.access_token;
-  config.refreshToken = tokenResponse.refresh_token || config.refreshToken;
-  config.idToken = firebaseAuth.idToken;
-  config.tokenExpiry = Date.now() + parseInt(firebaseAuth.expiresIn) * 1000;
-  config.uid = firebaseAuth.localId;
-  config.email = firebaseAuth.email;
-  config.displayName = firebaseAuth.displayName;
+  config.idToken = session.idToken;
+  config.refreshToken = session.refreshToken;
+  config.uid = session.uid;
+  config.email = session.email;
+  config.displayName = session.displayName;
+  config.tokenExpiry = Date.now() + 3600000; // 1 hour
 
   await saveConfig(config);
 
-  console.log("");
-  console.log(`Signed in as: ${firebaseAuth.email}`);
+  // Mark session as claimed and delete it
+  await claimAndDeleteSession(normalizedCode, session.idToken);
+
+  console.log(`Authenticated as: ${session.email}`);
   console.log("");
 
   // Fetch user profile from Firestore
-  await fetchAndSaveUserProfile(config, apiKey);
+  await fetchAndSaveUserProfile(config);
 
   return true;
 }
 
-async function waitForAuthCallback(expectedState: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-      resolve(null);
-    }, 120000); // 2 minute timeout
+export async function refreshTokens(): Promise<boolean> {
+  const config = await loadConfig();
 
-    const handler = async (request: Request): Promise<Response> => {
-      const url = new URL(request.url);
-
-      if (url.pathname === "/callback") {
-        const code = url.searchParams.get("code");
-        const state = url.searchParams.get("state");
-        const error = url.searchParams.get("error");
-
-        clearTimeout(timeout);
-
-        if (error) {
-          setTimeout(() => {
-            controller.abort();
-            resolve(null);
-          }, 100);
-          return new Response(
-            `<html><body><h1>Authentication Failed</h1><p>${error}</p><p>You can close this window.</p></body></html>`,
-            { headers: { "Content-Type": "text/html" } }
-          );
-        }
-
-        if (state !== expectedState) {
-          setTimeout(() => {
-            controller.abort();
-            resolve(null);
-          }, 100);
-          return new Response(
-            `<html><body><h1>Authentication Failed</h1><p>Invalid state parameter</p><p>You can close this window.</p></body></html>`,
-            { headers: { "Content-Type": "text/html" } }
-          );
-        }
-
-        setTimeout(() => {
-          controller.abort();
-          resolve(code);
-        }, 100);
-
-        return new Response(
-          `<html><body><h1>Authentication Successful!</h1><p>You can close this window and return to the terminal.</p></body></html>`,
-          { headers: { "Content-Type": "text/html" } }
-        );
-      }
-
-      return new Response("Not found", { status: 404 });
-    };
-
-    serve(handler, { port: OAUTH_PORT, signal: controller.signal }).catch(() => {
-      // Server stopped
-    });
-
-    console.log(`Waiting for authentication callback on port ${OAUTH_PORT}...`);
-  });
-}
-
-async function exchangeCodeForTokens(
-  code: string,
-  clientId: string,
-  clientSecret: string
-): Promise<TokenResponse | null> {
-  try {
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: OAUTH_CONFIG.redirectUri,
-        grant_type: "authorization_code",
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error("Token exchange error:", error);
-      return null;
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error("Token exchange error:", error);
-    return null;
+  if (!config.refreshToken) {
+    return false;
   }
-}
 
-async function signInToFirebase(idToken: string, apiKey: string): Promise<FirebaseAuthResponse | null> {
   try {
+    // Use Firebase's token refresh endpoint
     const response = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${apiKey}`,
+      `https://securetoken.googleapis.com/v1/token?key=${await getApiKey()}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          postBody: `id_token=${idToken}&providerId=google.com`,
-          requestUri: "http://localhost",
-          returnSecureToken: true,
-          returnIdpCredential: true,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: config.refreshToken,
         }),
       }
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error("Firebase sign-in error:", error);
-      return null;
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error("Firebase sign-in error:", error);
-    return null;
-  }
-}
-
-export async function refreshTokens(): Promise<boolean> {
-  const config = await loadConfig();
-  const credentials = await loadCredentials();
-
-  if (!config.refreshToken || !credentials) {
-    return false;
-  }
-
-  try {
-    // Refresh Google tokens
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        refresh_token: config.refreshToken,
-        client_id: credentials.clientId,
-        client_secret: credentials.clientSecret,
-        grant_type: "refresh_token",
-      }),
-    });
-
-    if (!response.ok) {
       return false;
     }
 
-    const tokenResponse: TokenResponse = await response.json();
+    const data = await response.json();
 
-    // Sign in to Firebase with refreshed token
-    const firebaseAuth = await signInToFirebase(tokenResponse.id_token, credentials.apiKey);
-    if (!firebaseAuth) {
-      return false;
-    }
-
-    // Update config
-    config.accessToken = tokenResponse.access_token;
-    config.idToken = firebaseAuth.idToken;
-    config.tokenExpiry = Date.now() + parseInt(firebaseAuth.expiresIn) * 1000;
+    // Update config with new tokens
+    config.idToken = data.id_token;
+    config.refreshToken = data.refresh_token;
+    config.tokenExpiry = Date.now() + parseInt(data.expires_in) * 1000;
 
     await saveConfig(config);
     return true;
   } catch {
     return false;
   }
+}
+
+async function getApiKey(): Promise<string> {
+  // Fetch the API key from the web app's config
+  // For now, we'll use a public approach - the Firebase config is public
+  // This key is safe to expose as it's restricted by Firebase rules
+  try {
+    const response = await fetch(`${WEB_APP_URL}/__/firebase/init.json`);
+    if (response.ok) {
+      const config = await response.json();
+      return config.apiKey || "";
+    }
+  } catch {
+    // Fall back to default
+  }
+  return "";
 }
 
 export async function ensureAuthenticated(): Promise<Config | null> {
@@ -297,25 +165,28 @@ export async function ensureAuthenticated(): Promise<Config | null> {
 }
 
 export async function logout(): Promise<void> {
+  // Clear all auth data but keep user preferences
   const config = await loadConfig();
 
-  // Keep credentials but clear auth tokens and user info
   const newConfig: Config = {
-    oauthClientId: config.oauthClientId,
-    oauthClientSecret: config.oauthClientSecret,
-    firebaseApiKey: config.firebaseApiKey,
+    // Keep settings
+    currentGroupId: config.currentGroupId,
+    currentGroupNumber: config.currentGroupNumber,
+    useRepeater: config.useRepeater,
+    simplexFrequency: config.simplexFrequency,
+    repeaterCallSign: config.repeaterCallSign,
+    repeaterFrequency: config.repeaterFrequency,
   };
 
   await saveConfig(newConfig);
   console.log("Logged out successfully.");
 }
 
-async function fetchAndSaveUserProfile(config: Config, apiKey: string): Promise<void> {
-  const credentials = await loadCredentials();
-  if (!credentials || !config.uid || !config.idToken) return;
+async function fetchAndSaveUserProfile(config: Config): Promise<void> {
+  if (!config.uid || !config.idToken) return;
 
   try {
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/users/${config.uid}`;
+    const url = `${FIRESTORE_BASE}/users/${config.uid}`;
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${config.idToken}`,
@@ -339,7 +210,7 @@ async function fetchAndSaveUserProfile(config: Config, apiKey: string): Promise<
           const groups = doc.fields.groups.arrayValue.values;
           for (const group of groups) {
             if (group.mapValue?.fields?.id?.stringValue === config.currentGroupId) {
-              config.currentGroupNumber = group.mapValue?.fields?.groupNumber?.integerValue;
+              config.currentGroupNumber = parseInt(group.mapValue?.fields?.groupNumber?.integerValue || "0");
               break;
             }
           }

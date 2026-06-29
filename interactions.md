@@ -271,3 +271,54 @@
 - **Root Cause**: `environment.ts` had Firebase config for project `wchw1-f9f49`, but app was deployed to `n3pay-2b69c`
 - **Fix**: Updated `environment.ts` with correct Firebase SDK config for `n3pay-2b69c` project
 - **Action Required**: User needs to run `npm run build && firebase deploy` to apply fix
+
+### Feature: CLI Web-Based Authentication (Device Authorization Flow)
+- **Request**: Replace CLI's direct OAuth with device authorization flow (like GitHub CLI)
+- **Actions Taken**:
+  - **Web App - New CLI Auth Component** (`src/app/components/cli-auth/cli-auth.component.ts`):
+    - Route at `/cli-auth` (requires authGuard)
+    - User enters 8-character device code (XXXX-XXXX format)
+    - Stores idToken, refreshToken, uid, email, displayName in Firestore `/cliAuthSessions/{code}`
+    - Session expires after 10 minutes, marked as claimed when CLI retrieves it
+    - Success message displayed after code submission
+  - **Route Configuration** (`src/app/app.routes.ts`):
+    - Added `/cli-auth` route with authGuard
+  - **Firestore Rules** (`firestore.rules`):
+    - Added rules for `cliAuthSessions` collection
+    - Authenticated users can create sessions for themselves
+    - Anyone with the code can read and claim (mark as claimed + delete)
+  - **CLI - Simplified Auth Flow** (`cli/auth.ts`):
+    - Removed OAuth credentials requirement (no more `lsr setup`)
+    - Generates random 8-char device code
+    - Displays code and opens browser to web app's `/cli-auth` page
+    - Polls Firestore for session (5-minute timeout)
+    - Retrieves tokens, saves to config, claims and deletes session
+    - Uses Firebase token refresh endpoint for token renewal
+  - **CLI - Updated Config** (`cli/config.ts`):
+    - Changed project ID from `wchw1-f9f49` to `n3pay-2b69c`
+    - Removed OAuth credential fields
+    - Added WEB_APP_URL constant
+  - **CLI - Updated Firestore** (`cli/firestore.ts`):
+    - Added `pollForSession()` function with 2-second polling interval
+    - Added `claimAndDeleteSession()` function
+    - Updated project ID
+  - **CLI - Updated main.ts**:
+    - Removed `setup` command (no longer needed)
+    - Updated version to 2.0.0
+    - Updated help text
+  - **CLI - Updated README.md**:
+    - Simplified documentation for new device flow
+    - Removed OAuth setup instructions
+  - **CLI - Updated deps.ts**:
+    - Removed `serve` import (no longer running local HTTP server)
+- **Security Considerations**:
+  - Code has ~41 bits entropy (8 chars from [A-Z0-9] minus confusables)
+  - 10-minute expiry prevents stale codes
+  - Single-use: marked as claimed immediately
+  - Session deleted after CLI retrieves tokens
+- **Verification Steps**:
+  1. Build web app: `npm run build && firebase deploy`
+  2. Compile CLI: `cd cli && deno task compile`
+  3. Run `./lsr logout` then `./lsr login`
+  4. Enter displayed code in web browser
+  5. Verify CLI authenticates successfully

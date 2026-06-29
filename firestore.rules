@@ -2,6 +2,20 @@ rules_version='2'
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // CLI authentication sessions
+    match /cliAuthSessions/{code} {
+      // Authenticated users can create sessions for themselves
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      // Update to mark as claimed (anyone with the code can claim)
+      allow update: if resource.data.claimed == false
+        && request.resource.data.claimed == true;
+      // Read allowed for polling (code acts as secret)
+      allow read: if true;
+      // Delete after claimed
+      allow delete: if true;
+    }
+
     match /{document=**} {
       // This rule allows anyone with your database reference to view, edit,
       // and delete all data in your database. It is useful for getting

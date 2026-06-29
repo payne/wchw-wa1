@@ -47,6 +47,11 @@ export const routes: Routes = [
     canActivate: [invitedUserGuard]
   },
   {
+    path: 'cli-auth',
+    loadComponent: () => import('./components/cli-auth/cli-auth.component').then(m => m.CliAuthComponent),
+    canActivate: [authGuard]
+  },
+  {
     path: '**',
     redirectTo: 'home'
   }

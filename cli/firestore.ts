@@ -258,3 +258,94 @@ export async function listGroups(config: Config): Promise<Array<{ id: string; gr
   const groups = profile.groups as Array<{ id: string; groupNumber: number; nickname: string }>;
   return groups;
 }
+
+// CLI Auth Session polling
+
+export interface CliAuthSession {
+  idToken: string;
+  refreshToken: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  claimed: boolean;
+}
+
+export async function pollForSession(code: string, timeoutSeconds: number): Promise<CliAuthSession | null> {
+  const pollInterval = 2000; // 2 seconds
+  const maxAttempts = Math.ceil((timeoutSeconds * 1000) / pollInterval);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const session = await getCliAuthSession(code);
+
+    if (session && !session.claimed) {
+      return session;
+    }
+
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+  }
+
+  return null;
+}
+
+async function getCliAuthSession(code: string): Promise<CliAuthSession | null> {
+  try {
+    const response = await fetch(`${FIRESTORE_BASE}/cliAuthSessions/${code}`);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null; // Session not found yet
+      }
+      return null;
+    }
+
+    const doc = await response.json();
+    if (!doc.fields) {
+      return null;
+    }
+
+    const fields = doc.fields;
+    return {
+      idToken: fields.idToken?.stringValue || "",
+      refreshToken: fields.refreshToken?.stringValue || "",
+      uid: fields.uid?.stringValue || "",
+      email: fields.email?.stringValue || "",
+      displayName: fields.displayName?.stringValue || "",
+      claimed: fields.claimed?.booleanValue || false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function claimAndDeleteSession(code: string, idToken: string): Promise<boolean> {
+  try {
+    // First, mark as claimed
+    const claimResponse = await fetch(`${FIRESTORE_BASE}/cliAuthSessions/${code}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fields: {
+          claimed: { booleanValue: true }
+        }
+      }),
+    });
+
+    if (!claimResponse.ok) {
+      console.error("Failed to claim session");
+      return false;
+    }
+
+    // Then delete the session
+    const deleteResponse = await fetch(`${FIRESTORE_BASE}/cliAuthSessions/${code}`, {
+      method: "DELETE",
+    });
+
+    return deleteResponse.ok;
+  } catch (error) {
+    console.error("Error claiming session:", error);
+    return false;
+  }
+}
