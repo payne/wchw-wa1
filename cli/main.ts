@@ -1,9 +1,22 @@
 import { parse } from "./deps.ts";
 import { loadConfig, saveConfig, Config } from "./config.ts";
 import { login, logout, ensureAuthenticated } from "./auth.ts";
-import { addSignalReport, listGroups } from "./firestore.ts";
+import { listGroups } from "./firestore.ts";
+import {
+  addToQueue,
+  getQueueStats,
+  getPendingReports,
+  clearSyncedReports,
+  retryFailedReports,
+  QueuedReport,
+} from "./queue.ts";
+import {
+  checkConnectivity,
+  trySyncSingleReport,
+  syncAllPending,
+} from "./sync.ts";
 
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 
 function printHelp(): void {
   console.log(`
@@ -17,6 +30,10 @@ USAGE:
   lsr status                         Show current status
   lsr config                         Show/set configuration
   lsr groups                         List available groups
+  lsr queue                          Show offline queue status
+  lsr queue sync                     Sync pending reports to cloud
+  lsr queue clear                    Remove synced reports from queue
+  lsr queue retry                    Retry failed reports
   lsr help                           Show this help
 
 EXAMPLES:
@@ -28,6 +45,7 @@ EXAMPLES:
   lsr config --simplex 146.52        Set simplex frequency
   lsr config --repeater W0JJK 145.235
   lsr status                         Show logged in user and settings
+  lsr queue sync                     Force sync all pending reports
 
 INTERACTIVE LOGGING MODE:
   lsr log
@@ -35,6 +53,10 @@ INTERACTIVE LOGGING MODE:
   > kf0vwz 324
   > k0ux 599
   > end
+
+OFFLINE SUPPORT:
+  Reports are queued locally and sync when online.
+  Use 'lsr queue' to check status, 'lsr queue sync' to force sync.
 
 OPTIONS:
   --time, -t <ISO8601>    Override timestamp (default: now)
@@ -69,6 +91,19 @@ async function printStatus(): Promise<void> {
       console.log(`  Repeater:   ${config.repeaterCallSign || ""} ${config.repeaterFrequency || ""}`);
     } else {
       console.log(`  Frequency:  ${config.simplexFrequency || "146.52"}`);
+    }
+
+    // Show queue status
+    const stats = await getQueueStats();
+    if (stats.pending > 0 || stats.failed > 0) {
+      console.log("");
+      console.log("Queue:");
+      if (stats.pending > 0) {
+        console.log(`  Pending: ${stats.pending} report${stats.pending !== 1 ? "s" : ""}`);
+      }
+      if (stats.failed > 0) {
+        console.log(`  Failed:  ${stats.failed} report${stats.failed !== 1 ? "s" : ""} (use 'lsr queue retry')`);
+      }
     }
   } else {
     console.log("Not logged in");
@@ -175,7 +210,7 @@ async function handleLogReport(transmitterCall: string, signalHeard: string, tim
   const config = await ensureAuthenticated();
   if (!config) return;
 
-  if (!config.callSign) {
+  if (!config.callSign || !config.uid) {
     console.error("Call sign not configured.");
     console.error("Set your call sign with: lsr config --callsign <CALL>");
     console.error("Or configure it in the web app.");
@@ -192,16 +227,37 @@ async function handleLogReport(transmitterCall: string, signalHeard: string, tim
 
   console.log(`Logging: ${config.callSign} heard ${transmitterCall.toUpperCase()} at ${signalHeard}`);
 
-  const success = await addSignalReport(config, transmitterCall, signalHeard, reportTime);
+  // Queue-first: always add to local queue first
+  const queuedReport = await addToQueue({
+    transmitterCall: transmitterCall.toUpperCase().trim(),
+    signalHeard: signalHeard.trim(),
+    time: reportTime,
+    receiverCall: config.callSign,
+    receiverUid: config.uid,
+    groupId: config.currentGroupId,
+    groupNumber: config.currentGroupNumber,
+    useRepeater: config.useRepeater || false,
+    repeaterCallSign: config.repeaterCallSign,
+    repeaterFrequency: config.repeaterFrequency,
+    simplexFrequency: config.simplexFrequency || "146.52",
+  });
 
-  if (success) {
+  // Try to sync immediately
+  const { synced, offline } = await trySyncSingleReport(config, queuedReport);
+
+  if (synced) {
     console.log("Signal report logged successfully!");
     if (config.currentGroupNumber) {
       console.log(`  Group: #${config.currentGroupNumber}`);
     }
     console.log(`  Time: ${reportTime.toISOString()}`);
+    console.log("  [synced to cloud]");
+  } else if (offline) {
+    console.log("Signal report queued.");
+    console.log("  [offline - queued for later sync]");
   } else {
-    console.error("Failed to log signal report.");
+    console.log("Signal report queued.");
+    console.log("  [sync failed - will retry later]");
   }
 }
 
@@ -209,7 +265,7 @@ async function handleInteractiveLogging(): Promise<void> {
   const config = await ensureAuthenticated();
   if (!config) return;
 
-  if (!config.callSign) {
+  if (!config.callSign || !config.uid) {
     console.error("Call sign not configured.");
     console.error("Set your call sign with: lsr config --callsign <CALL>");
     return;
@@ -228,9 +284,12 @@ async function handleInteractiveLogging(): Promise<void> {
   console.log("");
 
   let loggedCount = 0;
+  let syncedCount = 0;
+  let offlineCount = 0;
   let quietMode = false;
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
+  const sessionReports: QueuedReport[] = [];
 
   // Read from stdin line by line
   const buf = new Uint8Array(1024);
@@ -260,7 +319,29 @@ async function handleInteractiveLogging(): Promise<void> {
       const lowerLine = line.toLowerCase();
       if (lowerLine === "end" || lowerLine === "quit" || lowerLine === "exit" || lowerLine === "q") {
         console.log("");
+
+        // Try to sync any pending reports from this session
+        if (sessionReports.length > 0) {
+          const pending = await getPendingReports();
+          const sessionPending = pending.filter(p =>
+            sessionReports.some(s => s.id === p.id)
+          );
+
+          if (sessionPending.length > 0) {
+            console.log(`Syncing ${sessionPending.length} pending report${sessionPending.length !== 1 ? "s" : ""}...`);
+            const result = await syncAllPending(config, { verbose: false });
+            syncedCount += result.synced;
+            offlineCount = sessionPending.length - result.synced;
+          }
+        }
+
         console.log(`Session complete. Logged ${loggedCount} report${loggedCount !== 1 ? "s" : ""}.`);
+        if (syncedCount > 0 || offlineCount > 0) {
+          const parts: string[] = [];
+          if (syncedCount > 0) parts.push(`${syncedCount} synced`);
+          if (offlineCount > 0) parts.push(`${offlineCount} pending`);
+          console.log(`  (${parts.join(", ")})`);
+        }
         return;
       }
 
@@ -297,21 +378,153 @@ async function handleInteractiveLogging(): Promise<void> {
         continue;
       }
 
-      // Submit the report
-      const success = await addSignalReport(config, transmitterCall, signalHeard, new Date());
+      // Queue-first: add to local queue
+      const queuedReport = await addToQueue({
+        transmitterCall,
+        signalHeard,
+        time: new Date(),
+        receiverCall: config.callSign,
+        receiverUid: config.uid,
+        groupId: config.currentGroupId,
+        groupNumber: config.currentGroupNumber,
+        useRepeater: config.useRepeater || false,
+        repeaterCallSign: config.repeaterCallSign,
+        repeaterFrequency: config.repeaterFrequency,
+        simplexFrequency: config.simplexFrequency || "146.52",
+      });
 
-      if (success) {
-        loggedCount++;
-        if (!quietMode) {
+      sessionReports.push(queuedReport);
+      loggedCount++;
+
+      // Try immediate sync
+      const { synced, offline } = await trySyncSingleReport(config, queuedReport);
+
+      if (!quietMode) {
+        if (synced) {
+          syncedCount++;
           console.log(`  OK: ${transmitterCall} ${signalHeard}`);
+        } else if (offline) {
+          console.log(`  QUEUED: ${transmitterCall} ${signalHeard} (offline)`);
+        } else {
+          console.log(`  QUEUED: ${transmitterCall} ${signalHeard} (sync pending)`);
         }
-      } else {
-        console.log(`  FAILED: ${transmitterCall} ${signalHeard}`);
+      } else if (synced) {
+        syncedCount++;
       }
     }
   }
 
   console.log(`Session complete. Logged ${loggedCount} report${loggedCount !== 1 ? "s" : ""}.`);
+}
+
+async function handleQueue(subcommand?: string): Promise<void> {
+  const stats = await getQueueStats();
+
+  // lsr queue (no subcommand) - show status
+  if (!subcommand) {
+    console.log("Queue Status");
+    console.log("============");
+    console.log("");
+    console.log(`  Pending: ${stats.pending} report${stats.pending !== 1 ? "s" : ""}`);
+    console.log(`  Synced:  ${stats.synced} report${stats.synced !== 1 ? "s" : ""}`);
+    console.log(`  Failed:  ${stats.failed} report${stats.failed !== 1 ? "s" : ""}`);
+
+    if (stats.lastSuccessfulSync) {
+      console.log("");
+      console.log(`Last sync: ${stats.lastSuccessfulSync}`);
+    }
+
+    if (stats.pending > 0) {
+      console.log("");
+      console.log("Run 'lsr queue sync' to sync pending reports.");
+    }
+    if (stats.failed > 0) {
+      console.log("Run 'lsr queue retry' to retry failed reports.");
+    }
+    if (stats.synced > 0) {
+      console.log("Run 'lsr queue clear' to remove synced reports.");
+    }
+
+    return;
+  }
+
+  // lsr queue sync
+  if (subcommand === "sync") {
+    const pending = await getPendingReports();
+
+    if (pending.length === 0) {
+      console.log("No pending reports to sync.");
+      return;
+    }
+
+    // Check connectivity first
+    const isOnline = await checkConnectivity();
+    if (!isOnline) {
+      console.log("Cannot sync: No network connectivity.");
+      console.log(`${pending.length} report${pending.length !== 1 ? "s" : ""} remain pending.`);
+      return;
+    }
+
+    const config = await ensureAuthenticated();
+    if (!config) return;
+
+    console.log(`Syncing ${pending.length} pending report${pending.length !== 1 ? "s" : ""}...`);
+
+    const result = await syncAllPending(config, { verbose: true });
+
+    console.log("");
+    console.log(`Sync complete: ${result.synced} synced, ${result.failed} failed`);
+
+    return;
+  }
+
+  // lsr queue clear
+  if (subcommand === "clear") {
+    if (stats.synced === 0) {
+      console.log("No synced reports to clear.");
+      return;
+    }
+
+    const cleared = await clearSyncedReports();
+    console.log(`Cleared ${cleared} synced report${cleared !== 1 ? "s" : ""} from queue.`);
+
+    return;
+  }
+
+  // lsr queue retry
+  if (subcommand === "retry") {
+    if (stats.failed === 0) {
+      console.log("No failed reports to retry.");
+      return;
+    }
+
+    const retried = await retryFailedReports();
+    console.log(`Reset ${retried} failed report${retried !== 1 ? "s" : ""} to pending.`);
+
+    // Check connectivity and sync
+    const isOnline = await checkConnectivity();
+    if (!isOnline) {
+      console.log("Cannot sync now: No network connectivity.");
+      console.log("Run 'lsr queue sync' when online.");
+      return;
+    }
+
+    const config = await ensureAuthenticated();
+    if (!config) return;
+
+    console.log(`Syncing ${retried} report${retried !== 1 ? "s" : ""}...`);
+
+    const result = await syncAllPending(config, { verbose: true });
+
+    console.log("");
+    console.log(`Sync complete: ${result.synced} synced, ${result.failed} failed`);
+
+    return;
+  }
+
+  // Unknown subcommand
+  console.error(`Unknown queue command: ${subcommand}`);
+  console.error("Valid commands: lsr queue, lsr queue sync, lsr queue clear, lsr queue retry");
 }
 
 async function main(): Promise<void> {
@@ -367,6 +580,10 @@ async function main(): Promise<void> {
     case "log":
     case "logging":
       await handleInteractiveLogging();
+      break;
+
+    case "queue":
+      await handleQueue(args._[1] as string | undefined);
       break;
 
     case "help":

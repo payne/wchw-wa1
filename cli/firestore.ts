@@ -71,13 +71,15 @@ export interface SignalReportInput {
     latitude?: number;
     longitude?: number;
   };
+  clientId?: string;  // UUID for deduplication from offline queue
 }
 
 export async function addSignalReport(
   config: Config,
   transmitterCall: string,
   signalHeard: string,
-  time?: Date
+  time?: Date,
+  clientId?: string
 ): Promise<boolean> {
   if (!config.idToken || !config.uid || !config.callSign) {
     console.error("Not properly configured. Please run: lsr login");
@@ -116,6 +118,11 @@ export async function addSignalReport(
     useRepeater: toFirestoreValue(report.useRepeater),
     createdAt: toFirestoreValue(new Date()),
   };
+
+  // Add clientId for deduplication if provided
+  if (clientId) {
+    fields.clientId = toFirestoreValue(clientId);
+  }
 
   if (report.groupId) {
     fields.groupId = toFirestoreValue(report.groupId);
@@ -246,6 +253,92 @@ export async function updateUserProfile(
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+// Interface for syncing queued reports
+export interface QueuedReportData {
+  clientId: string;
+  transmitterCall: string;
+  signalHeard: string;
+  time: Date;
+  receiverCall: string;
+  receiverUid: string;
+  groupId?: string;
+  groupNumber?: number;
+  useRepeater: boolean;
+  repeaterCallSign?: string;
+  repeaterFrequency?: string;
+  simplexFrequency?: string;
+}
+
+export interface SyncQueuedReportResult {
+  success: boolean;
+  error?: string;
+  isDuplicate?: boolean;
+}
+
+export async function syncQueuedReport(
+  config: Config,
+  data: QueuedReportData
+): Promise<SyncQueuedReportResult> {
+  if (!config.idToken) {
+    return { success: false, error: "Not authenticated" };
+  }
+
+  // Build Firestore document
+  const fields: Record<string, FirestoreValue> = {
+    transmitterCall: toFirestoreValue(data.transmitterCall.toUpperCase().trim()),
+    signalHeard: toFirestoreValue(data.signalHeard.trim()),
+    time: toFirestoreValue(data.time),
+    receiverCall: toFirestoreValue(data.receiverCall),
+    receiverUid: toFirestoreValue(data.receiverUid),
+    useRepeater: toFirestoreValue(data.useRepeater),
+    createdAt: toFirestoreValue(new Date()),
+    clientId: toFirestoreValue(data.clientId),
+  };
+
+  if (data.groupId) {
+    fields.groupId = toFirestoreValue(data.groupId);
+  }
+  if (data.groupNumber) {
+    fields.groupNumber = toFirestoreValue(data.groupNumber);
+  }
+  if (data.repeaterCallSign) {
+    fields.repeaterCallSign = toFirestoreValue(data.repeaterCallSign);
+  }
+  if (data.repeaterFrequency) {
+    fields.repeaterFrequency = toFirestoreValue(data.repeaterFrequency);
+  }
+  if (data.simplexFrequency) {
+    fields.simplexFrequency = toFirestoreValue(data.simplexFrequency);
+  }
+
+  try {
+    const response = await fetch(`${FIRESTORE_BASE}/signalReports`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ fields }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      // Check for 401 (token expired)
+      if (response.status === 401) {
+        return { success: false, error: "Token expired - please run 'lsr login'" };
+      }
+
+      return { success: false, error: errorText };
+    }
+
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return { success: false, error: errorMessage };
   }
 }
 

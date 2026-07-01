@@ -365,3 +365,37 @@
   > kd0nmd 55
     OK: KD0NMD 55
   ```
+
+## 2026-07-01
+
+### Feature: Offline Queue System
+- **Request**: Make CLI resilient to network outages with local queue system
+- **Actions Taken**:
+  - **New Files Created**:
+    - `cli/OFFLINE.md` - Documentation for the offline queue system
+    - `cli/queue.ts` - Queue management with QueuedReport/QueueState interfaces
+    - `cli/sync.ts` - Connectivity checking and sync operations
+  - **Modified Files**:
+    - `cli/config.ts` - Added getQueueFilePath() function
+    - `cli/firestore.ts` - Added clientId parameter for deduplication, syncQueuedReport() function
+    - `cli/main.ts` - Updated to v2.2.0 with queue-first architecture
+  - **Queue-First Architecture**:
+    - Every signal report goes to local queue (`~/.wchw/queue.json`) first
+    - Immediate sync attempt after queuing
+    - Graceful offline handling with "[offline - queued for later sync]" message
+  - **New Commands**:
+    - `lsr queue` - Show queue status (pending, synced, failed counts)
+    - `lsr queue sync` - Force sync all pending reports
+    - `lsr queue clear` - Remove synced reports from queue
+    - `lsr queue retry` - Reset failed reports and retry sync
+  - **Features**:
+    - UUID-based deduplication via clientId
+    - Exponential backoff retry (1s, 2s, 4s... max 5min)
+    - Atomic file writes (write to .tmp, then rename)
+    - Max 5 attempts before marking as failed
+    - Batch sync at end of interactive sessions
+    - Queue status shown in `lsr status` when pending/failed reports exist
+  - **User Experience**:
+    - Online: "Signal report logged successfully! [synced to cloud]"
+    - Offline: "Signal report queued. [offline - queued for later sync]"
+    - Interactive mode shows sync summary at session end

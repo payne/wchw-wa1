@@ -34,10 +34,15 @@ export interface Config {
 
 const CONFIG_DIR = join(Deno.env.get("HOME") || "~", ".wchw");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const QUEUE_FILE = join(CONFIG_DIR, "queue.json");
 
 export async function getConfigDir(): Promise<string> {
   await ensureDir(CONFIG_DIR);
   return CONFIG_DIR;
+}
+
+export function getQueueFilePath(): string {
+  return QUEUE_FILE;
 }
 
 export async function loadConfig(): Promise<Config> {

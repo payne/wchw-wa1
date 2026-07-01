@@ -149,6 +149,10 @@ lsr help
 | `lsr status` | Show current status and settings |
 | `lsr config` | Show/set configuration |
 | `lsr groups` | List available groups |
+| `lsr queue` | Show offline queue status |
+| `lsr queue sync` | Sync pending reports to cloud |
+| `lsr queue clear` | Remove synced reports from queue |
+| `lsr queue retry` | Retry failed reports |
 | `lsr help` | Show help |
 
 ## Options
@@ -225,9 +229,52 @@ The CLI will automatically refresh tokens. If it fails, run `lsr login` again.
 
 Groups must be created in the web app. Run `lsr groups` to see available groups.
 
+## Offline Support
+
+The CLI works offline! Reports are queued locally and synced when connectivity is restored.
+
+### How it works
+
+1. Every signal report is saved to a local queue (`~/.wchw/queue.json`) first
+2. The CLI immediately attempts to sync to the cloud
+3. If offline, reports stay queued for later sync
+4. Run `lsr queue sync` when you're back online
+
+### Example
+
+```bash
+# While offline
+$ lsr KX0U 59
+Logging: N3PAY heard KX0U at 59
+Signal report queued.
+  [offline - queued for later sync]
+
+# Check queue status
+$ lsr queue
+Queue Status
+============
+  Pending: 3 reports
+  Synced:  0 reports
+  Failed:  0 reports
+
+Run 'lsr queue sync' to sync pending reports.
+
+# When back online
+$ lsr queue sync
+Syncing 3 pending reports...
+  KX0U 59       [synced]
+  KF0VWD 57     [synced]
+  K0UM 55       [synced]
+
+Sync complete: 3 synced, 0 failed
+```
+
+For more details, see [OFFLINE.md](./OFFLINE.md).
+
 ## Security
 
 - Authentication tokens are stored in `~/.wchw/config.json`
 - The device code flow ensures credentials never pass through untrusted channels
 - Tokens are automatically refreshed when expired
 - All communication uses HTTPS
+- Offline queue is stored in `~/.wchw/queue.json`
